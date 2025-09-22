@@ -1,0 +1,186 @@
+{
+  "common": {
+    "loading": "Carregando...",
+    "save": "Salvar",
+    "cancel": "Cancelar",
+    "edit": "Editar",
+    "delete": "Excluir",
+    "create": "Criar",
+    "update": "Atualizar",
+    "search": "Pesquisar",
+    "add": "Adicionar",
+    "close": "Fechar",
+    "confirm": "Confirmar",
+    "yes": "Sim",
+    "no": "Não",
+    "total": "Total",
+    "status": "Status",
+    "date": "Data",
+    "amount": "Valor",
+    "notes": "Observações",
+    "actions": "Ações"
+  },
+  "navigation": {
+    "dashboard": "Dashboard",
+    "clients": "Clientes",
+    "events": "Eventos",
+    "payments": "Pagamentos",
+    "calendar": "Calendário",
+    "reports": "Relatórios",
+    "logout": "Sair"
+  },
+  "landing": {
+    "title": "EventFinance",
+    "subtitle": "Organize seus eventos e mantenha o controle financeiro de forma simples e eficiente. A solução completa para cerimonialistas e empresas de decoração.",
+    "loginWithGoogle": "Entrar com Google",
+    "readyToStart": "Pronto para começar?",
+    "signInMessage": "Entre com sua conta Google e comece a organizar seus eventos hoje mesmo.",
+    "features": {
+      "clientManagement": {
+        "title": "Gestão de Clientes",
+        "description": "Mantenha todas as informações dos seus clientes organizadas e facilmente acessíveis"
+      },
+      "eventPlanning": {
+        "title": "Planejamento de Eventos",
+        "description": "Planeje e acompanhe todos os seus eventos com informações detalhadas e status"
+      },
+      "financialControl": {
+        "title": "Controle Financeiro",
+        "description": "Acompanhe pagamentos, parcelas e mantenha controle financeiro completo"
+      },
+      "reportsAnalytics": {
+        "title": "Relatórios e Análises",
+        "description": "Gere relatórios detalhados e obtenha insights sobre seu negócio"
+      }
+    }
+  },
+  "dashboard": {
+    "title": "Dashboard",
+    "welcome": "Bem-vindo de volta, {{name}}! Aqui está a visão geral do seu negócio.",
+    "receivedThisMonth": "Recebido Este Mês",
+    "pendingPayments": "Pagamentos Pendentes",
+    "totalClients": "Total de Clientes",
+    "activeEvents": "Eventos Ativos",
+    "upcomingEvents": "Próximos Eventos",
+    "paymentsDueSoon": "Pagamentos Próximos do Vencimento",
+    "noUpcomingEvents": "Nenhum evento próximo",
+    "noPaymentsDue": "Nenhum pagamento próximo do vencimento",
+    "newClient": "Novo Cliente",
+    "newEvent": "Novo Evento",
+    "due": "Vencimento"
+  },
+  "clients": {
+    "title": "Clientes",
+    "subtitle": "Gerencie sua base de clientes",
+    "addClient": "Adicionar Cliente",
+    "editClient": "Editar Cliente",
+    "addNewClient": "Adicionar Novo Cliente",
+    "searchClients": "Pesquisar clientes...",
+    "noClientsFound": "Nenhum cliente encontrado",
+    "deleteConfirm": "Tem certeza que deseja excluir este cliente?",
+    "fields": {
+      "name": "Nome",
+      "phone": "Telefone",
+      "email": "E-mail",
+      "notes": "Observações"
+    },
+    "validation": {
+      "nameRequired": "Nome é obrigatório",
+      "phoneRequired": "Telefone é obrigatório",
+      "emailRequired": "E-mail é obrigatório",
+      "emailInvalid": "E-mail inválido"
+    }
+  },
+  "events": {
+    "title": "Eventos",
+    "subtitle": "Gerencie seu portfólio de eventos",
+    "addEvent": "Adicionar Evento",
+    "editEvent": "Editar Evento",
+    "addNewEvent": "Adicionar Novo Evento",
+    "searchEvents": "Pesquisar eventos...",
+    "noEventsFound": "Nenhum evento encontrado",
+    "deleteConfirm": "Tem certeza que deseja excluir este evento?",
+    "allStatus": "Todos os Status",
+    "types": {
+      "wedding": "Casamento",
+      "debutante": "Debutante",
+      "birthday": "Aniversário",
+      "graduation": "Formatura",
+      "other": "Outro"
+    },
+    "status": {
+      "planning": "Planejamento",
+      "confirmed": "Confirmado",
+      "completed": "Concluído",
+      "canceled": "Cancelado"
+    },
+    "fields": {
+      "client": "Cliente",
+      "eventType": "Tipo de Evento",
+      "eventName": "Nome do Evento",
+      "eventDate": "Data do Evento",
+      "location": "Local",
+      "contractTotal": "Total do Contrato",
+      "additionalDetails": "Detalhes Adicionais",
+      "selectClient": "Selecione um cliente",
+      "selectEventType": "Selecione o tipo de evento"
+    },
+    "validation": {
+      "clientRequired": "Cliente é obrigatório",
+      "typeRequired": "Tipo de evento é obrigatório",
+      "nameRequired": "Nome do evento é obrigatório",
+      "dateRequired": "Data do evento é obrigatória",
+      "locationRequired": "Local é obrigatório",
+      "contractRequired": "Total do contrato é obrigatório",
+      "statusRequired": "Status é obrigatório",
+      "amountPositive": "Valor deve ser positivo"
+    }
+  },
+  "payments": {
+    "title": "Pagamentos",
+    "subtitle": "Acompanhe todos os pagamentos dos eventos",
+    "addPayment": "Adicionar Pagamento",
+    "editPayment": "Editar Pagamento",
+    "addNewPayment": "Adicionar Novo Pagamento",
+    "searchPayments": "Pesquisar pagamentos...",
+    "noPaymentsFound": "Nenhum pagamento encontrado",
+    "deleteConfirm": "Tem certeza que deseja excluir este pagamento?",
+    "totalReceived": "Total Recebido",
+    "pendingPayments": "Pagamentos Pendentes",
+    "totalPayments": "Total de Pagamentos",
+    "paymentList": "Lista de Pagamentos",
+    "allPayments": "Todos os Pagamentos",
+    "received": "Recebido",
+    "pending": "Pendente",
+    "paymentReceived": "Pagamento recebido",
+    "methods": {
+      "pix": "PIX",
+      "card": "Cartão",
+      "boleto": "Boleto",
+      "cash": "Dinheiro"
+    },
+    "fields": {
+      "event": "Evento",
+      "paymentDate": "Data do Pagamento",
+      "paymentMethod": "Método de Pagamento",
+      "selectEvent": "Selecione um evento",
+      "selectPaymentMethod": "Selecione o método de pagamento"
+    },
+    "validation": {
+      "eventRequired": "Evento é obrigatório",
+      "amountRequired": "Valor é obrigatório",
+      "dateRequired": "Data do pagamento é obrigatória",
+      "methodRequired": "Método de pagamento é obrigatório",
+      "amountPositive": "Valor deve ser positivo"
+    }
+  },
+  "calendar": {
+    "title": "Calendário",
+    "subtitle": "Visualização do calendário em breve..."
+  },
+  "reports": {
+    "title": "Relatórios",
+    "subtitle": "Relatórios e análises em breve..."
+  },
+  "currency": "R$"
+}
