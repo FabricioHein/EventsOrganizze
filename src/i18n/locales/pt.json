@@ -101,6 +101,8 @@
     "noEventsFound": "Nenhum evento encontrado",
     "deleteConfirm": "Tem certeza que deseja excluir este evento?",
     "allStatus": "Todos os Status",
+    "newClient": "Cliente novo?",
+    "newClientData": "Dados do Novo Cliente",
     "types": {
       "wedding": "Casamento",
       "debutante": "Debutante",
@@ -153,6 +155,20 @@
     "received": "Recebido",
     "pending": "Pendente",
     "paymentReceived": "Pagamento recebido",
+    "filters": {
+      "title": "Filtros",
+      "status": "Status",
+      "event": "Evento",
+      "method": "Método de Pagamento",
+      "allEvents": "Todos os Eventos",
+      "allMethods": "Todos os Métodos",
+      "minAmount": "Valor Mínimo",
+      "maxAmount": "Valor Máximo",
+      "startDate": "Data Inicial",
+      "endDate": "Data Final",
+      "clearFilters": "Limpar Filtros",
+      "clear": "Limpar"
+    },
     "methods": {
       "pix": "PIX",
       "card": "Cartão",

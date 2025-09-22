@@ -101,6 +101,8 @@
     "noEventsFound": "No se encontraron eventos",
     "deleteConfirm": "¿Estás seguro de que quieres eliminar este evento?",
     "allStatus": "Todos los Estados",
+    "newClient": "¿Cliente nuevo?",
+    "newClientData": "Datos del Nuevo Cliente",
     "types": {
       "wedding": "Boda",
       "debutante": "Quinceañera",
@@ -153,6 +155,20 @@
     "received": "Recibido",
     "pending": "Pendiente",
     "paymentReceived": "Pago recibido",
+    "filters": {
+      "title": "Filtros",
+      "status": "Estado",
+      "event": "Evento",
+      "method": "Método de Pago",
+      "allEvents": "Todos los Eventos",
+      "allMethods": "Todos los Métodos",
+      "minAmount": "Cantidad Mínima",
+      "maxAmount": "Cantidad Máxima",
+      "startDate": "Fecha Inicial",
+      "endDate": "Fecha Final",
+      "clearFilters": "Limpiar Filtros",
+      "clear": "Limpiar"
+    },
     "methods": {
       "pix": "PIX",
       "card": "Tarjeta",

@@ -1,14 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from 'react-i18next';
-import { getEvents, addEvent, updateEvent, deleteEvent, getClients } from '../services/firebaseService';
+import { getEvents, addEvent, updateEvent, deleteEvent, getClients, addClient } from '../services/firebaseService';
 import { Event, Client } from '../types';
 import { Plus, Search, Edit2, Trash2, Calendar, MapPin, User, DollarSign } from 'lucide-react';
 import Button from '../components/ui/Button';
 import Modal from '../components/ui/Modal';
 import PaymentInstallmentsModal from '../components/ui/PaymentInstallmentsModal';
 import { uploadContract, deleteContract, addPaymentInstallments } from '../services/firebaseService';
-import { useForm } from 'react-hook-form';
+import { useForm, useFieldArray } from 'react-hook-form';
 import { format } from 'date-fns';
 import EventDetailsModal from '../components/ui/EventDetailsModal';
 
@@ -27,8 +27,15 @@ const EventsPage: React.FC = () => {
   const [uploadingContract, setUploadingContract] = useState<string | null>(null);
   const [showEventDetails, setShowEventDetails] = useState(false);
   const [selectedEventForDetails, setSelectedEventForDetails] = useState<Event | null>(null);
+  const [isNewClient, setIsNewClient] = useState(false);
 
-  const { register, handleSubmit, reset, setValue, watch, formState: { errors } } = useForm<Omit<Event, 'id' | 'createdAt' | 'userId' | 'clientName'>>();
+  const { register, handleSubmit, reset, setValue, watch, formState: { errors }, control } = useForm<Omit<Event, 'id' | 'createdAt' | 'userId' | 'clientName'>>();
+  const { register: registerClient, formState: { errors: clientErrors }, getValues: getClientValues, reset: resetClient } = useForm<Omit<Client, 'id' | 'createdAt' | 'userId'>>();
+
+  const { fields, append, remove } = useFieldArray({
+    control,
+    name: 'installments'
+  });
 
   const watchedClientId = watch('clientId');
   const watchedType = watch('type');
@@ -76,13 +83,36 @@ const EventsPage: React.FC = () => {
     if (!user) return;
 
     try {
-      const selectedClient = clients.find(c => c.id === data.clientId);
-      if (!selectedClient) return;
+      let selectedClient: Client;
+      
+      if (isNewClient) {
+        // Create new client first
+        const clientData = getClientValues();
+        if (!clientData.name || !clientData.phone || !clientData.email) {
+          alert('Por favor, preencha todos os campos obrigatórios do cliente.');
+          return;
+        }
+        
+        const clientId = await addClient({ ...clientData, userId: user.uid });
+        selectedClient = {
+          id: clientId,
+          ...clientData,
+          userId: user.uid,
+          createdAt: new Date()
+        };
+        
+        // Add to local clients list immediately
+        setClients(prev => [selectedClient, ...prev]);
+      } else {
+        selectedClient = clients.find(c => c.id === data.clientId);
+        if (!selectedClient) return;
+      }
 
       const eventData = {
         ...data,
         date: new Date(data.date),
         contractTotal: Number(data.contractTotal),
+        clientId: selectedClient.id,
         clientName: selectedClient.name,
         userId: user.uid,
       };
@@ -187,7 +217,9 @@ const EventsPage: React.FC = () => {
   const handleCloseModal = () => {
     setIsModalOpen(false);
     setEditingEvent(null);
+    setIsNewClient(false);
     reset();
+    resetClient();
   };
 
   const filteredEvents = events.filter(event => {
@@ -387,18 +419,99 @@ const EventsPage: React.FC = () => {
               <label htmlFor="clientId" className="block text-sm font-medium text-gray-700 mb-1">
                 {t('events.fields.client')} *
               </label>
-              <select
-                id="clientId"
-                {...register('clientId', { required: t('events.validation.clientRequired') })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-              >
-                <option value="">{t('events.fields.selectClient')}</option>
-                {clients.map(client => (
-                  <option key={client.id} value={client.id}>{client.name}</option>
-                ))}
-              </select>
-              {errors.clientId && (
-                <p className="text-red-500 text-sm mt-1">{errors.clientId.message}</p>
+              
+              {!isNewClient ? (
+                <>
+                  <select
+                    id="clientId"
+                    {...register('clientId', { required: !isNewClient ? t('events.validation.clientRequired') : false })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                  >
+                    <option value="">{t('events.fields.selectClient')}</option>
+                    {clients.map(client => (
+                      <option key={client.id} value={client.id}>{client.name}</option>
+                    ))}
+                  </select>
+                  {errors.clientId && (
+                    <p className="text-red-500 text-sm mt-1">{errors.clientId.message}</p>
+                  )}
+                </>
+              ) : null}
+              
+              <div className="mt-3 flex items-center">
+                <input
+                  type="checkbox"
+                  id="newClient"
+                  checked={isNewClient}
+                  onChange={(e) => setIsNewClient(e.target.checked)}
+                  className="h-4 w-4 text-purple-600 focus:ring-purple-500 border-gray-300 rounded"
+                />
+                <label htmlFor="newClient" className="ml-2 block text-sm text-gray-900">
+                  {t('events.newClient')}
+                </label>
+              </div>
+              
+              {isNewClient && (
+                <div className="mt-3 bg-gray-50 p-4 rounded-lg space-y-3">
+                  <h4 className="text-sm font-medium text-gray-900">{t('events.newClientData')}</h4>
+                  
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">
+                      {t('clients.fields.name')} *
+                    </label>
+                    <input
+                      type="text"
+                      {...registerClient('name', { required: t('clients.validation.nameRequired') })}
+                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    />
+                    {clientErrors.name && (
+                      <p className="text-red-500 text-xs mt-1">{clientErrors.name.message}</p>
+                    )}
+                  </div>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">
+                        {t('clients.fields.phone')}
+                      </label>
+                      <input
+                        type="tel"
+                        {...registerClient('phone')}
+                        className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                      />
+                    </div>
+                    
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">
+                        {t('clients.fields.email')}
+                      </label>
+                      <input
+                        type="email"
+                        {...registerClient('email', {
+                          pattern: {
+                            value: /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i,
+                            message: t('clients.validation.emailInvalid')
+                          }
+                        })}
+                        className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                      />
+                      {clientErrors.email && (
+                        <p className="text-red-500 text-xs mt-1">{clientErrors.email.message}</p>
+                      )}
+                    </div>
+                  </div>
+                  
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">
+                      {t('clients.fields.notes')}
+                    </label>
+                    <textarea
+                      rows={2}
+                      {...registerClient('notes')}
+                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    />
+                  </div>
+                </div>
               )}
             </div>
 
