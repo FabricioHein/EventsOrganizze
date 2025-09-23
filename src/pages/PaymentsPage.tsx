@@ -28,6 +28,12 @@ const PaymentsPage: React.FC = () => {
   const [endDate, setEndDate] = useState<string>('');
   const [showInstallmentsModal, setShowInstallmentsModal] = useState(false);
   const [selectedEventForInstallments, setSelectedEventForInstallments] = useState<Event | null>(null);
+  const [isCreatingInstallments, setIsCreatingInstallments] = useState(false);
+  const [installmentCount, setInstallmentCount] = useState<number>(1);
+  const [installmentInterval, setInstallmentInterval] = useState<'monthly' | 'weekly' | 'custom'>('monthly');
+  const [hasDownPayment, setHasDownPayment] = useState(false);
+  const [downPaymentAmount, setDownPaymentAmount] = useState<string>('');
+  const [downPaymentReceived, setDownPaymentReceived] = useState(false);
 
   const { register, handleSubmit, reset, setValue, formState: { errors } } = useForm<Omit<Payment, 'id' | 'createdAt' | 'userId' | 'eventName'>>();
 
@@ -59,18 +65,70 @@ const PaymentsPage: React.FC = () => {
       const selectedEvent = events.find(e => e.id === data.eventId);
       if (!selectedEvent) return;
 
-      const paymentData = {
-        ...data,
-        paymentDate: new Date(data.paymentDate),
-        amount: Number(data.amount),
-        eventName: selectedEvent.name,
-        userId: user.uid,
-      };
-
-      if (editingPayment) {
-        await updatePayment(editingPayment.id, paymentData);
+      if (isCreatingInstallments && installmentCount > 1) {
+        // Create installments
+        const totalAmount = Number(data.amount);
+        let remainingAmount = totalAmount;
+        const installments = [];
+        
+        // Add down payment if configured
+        if (hasDownPayment && downPaymentAmount) {
+          const downAmount = Number(downPaymentAmount);
+          remainingAmount -= downAmount;
+          
+          installments.push({
+            amount: downAmount,
+            paymentDate: new Date(data.paymentDate),
+            method: data.method,
+            notes: data.notes ? `${data.notes} - Entrada` : 'Entrada',
+            received: downPaymentReceived,
+          });
+        }
+        
+        // Calculate installment amount for remaining value
+        const installmentAmount = Math.floor((remainingAmount / installmentCount) * 100) / 100;
+        const remainder = remainingAmount - (installmentAmount * installmentCount);
+        
+        // Add installments
+        for (let i = 0; i < installmentCount; i++) {
+          const installmentDate = new Date(data.paymentDate);
+          
+          if (installmentInterval === 'monthly') {
+            installmentDate.setMonth(installmentDate.getMonth() + (hasDownPayment ? i + 1 : i));
+          } else if (installmentInterval === 'weekly') {
+            installmentDate.setDate(installmentDate.getDate() + ((hasDownPayment ? i + 1 : i) * 7));
+          }
+          
+          installments.push({
+            amount: i === installmentCount - 1 ? installmentAmount + remainder : installmentAmount,
+            paymentDate: installmentDate,
+            method: data.method,
+            notes: data.notes ? `${data.notes} - Parcela ${i + 1}/${installmentCount}` : `Parcela ${i + 1}/${installmentCount}`,
+            received: false, // Installments start as not received
+          });
+        }
+        
+        await addPaymentInstallments(
+          selectedEvent.id,
+          selectedEvent.name,
+          user.uid,
+          installments
+        );
       } else {
-        await addPayment(paymentData);
+        // Create single payment
+        const paymentData = {
+          ...data,
+          paymentDate: new Date(data.paymentDate),
+          amount: Number(data.amount),
+          eventName: selectedEvent.name,
+          userId: user.uid,
+        };
+
+        if (editingPayment) {
+          await updatePayment(editingPayment.id, paymentData);
+        } else {
+          await addPayment(paymentData);
+        }
       }
       
       await fetchData();
@@ -147,6 +205,12 @@ const PaymentsPage: React.FC = () => {
   const handleCloseModal = () => {
     setIsModalOpen(false);
     setEditingPayment(null);
+    setIsCreatingInstallments(false);
+    setInstallmentCount(1);
+    setInstallmentInterval('monthly');
+    setHasDownPayment(false);
+    setDownPaymentAmount('');
+    setDownPaymentReceived(false);
     reset();
   };
 
@@ -188,8 +252,8 @@ const PaymentsPage: React.FC = () => {
   };
 
   // Calculate totals
-  const totalReceived = payments.filter(p => p.received).reduce((sum, p) => sum + p.amount, 0);
-  const totalPending = payments.filter(p => !p.received).reduce((sum, p) => sum + p.amount, 0);
+  const totalReceived = filteredPayments.filter(p => p.received).reduce((sum, p) => sum + p.amount, 0);
+  const totalPending = filteredPayments.filter(p => !p.received).reduce((sum, p) => sum + p.amount, 0);
 
   if (loading) {
     return (
@@ -246,7 +310,7 @@ const PaymentsPage: React.FC = () => {
             <div>
               <p className="text-sm font-medium text-gray-600">{t('payments.totalPayments')}</p>
               <p className="text-2xl font-bold text-purple-600">
-                {payments.length}
+                {filteredPayments.length}
               </p>
             </div>
             <DollarSign className="h-12 w-12 text-purple-600 opacity-80" />
@@ -526,7 +590,7 @@ const PaymentsPage: React.FC = () => {
       <Modal
         isOpen={isModalOpen}
         onClose={handleCloseModal}
-        title={editingPayment ? t('payments.editPayment') : t('payments.addNewPayment')}
+        title={editingPayment ? t('payments.editPayment') : (isCreatingInstallments ? 'Criar Parcelamento' : t('payments.addNewPayment'))}
       >
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
           <div>
@@ -548,10 +612,132 @@ const PaymentsPage: React.FC = () => {
             )}
           </div>
 
+          {/* Payment Type Selection */}
+          {!editingPayment && (
+            <div className="bg-gray-50 p-4 rounded-lg">
+              <h3 className="text-sm font-medium text-gray-700 mb-3">Tipo de Pagamento</h3>
+              <div className="flex space-x-4">
+                <label className="flex items-center">
+                  <input
+                    type="radio"
+                    checked={!isCreatingInstallments}
+                    onChange={() => setIsCreatingInstallments(false)}
+                    className="h-4 w-4 text-purple-600 focus:ring-purple-500 border-gray-300"
+                  />
+                  <span className="ml-2 text-sm text-gray-700">Pagamento Único</span>
+                </label>
+                <label className="flex items-center">
+                  <input
+                    type="radio"
+                    checked={isCreatingInstallments}
+                    onChange={() => setIsCreatingInstallments(true)}
+                    className="h-4 w-4 text-purple-600 focus:ring-purple-500 border-gray-300"
+                  />
+                  <span className="ml-2 text-sm text-gray-700">Parcelamento</span>
+                </label>
+              </div>
+            </div>
+          )}
+
+          {/* Installment Configuration */}
+          {isCreatingInstallments && !editingPayment && (
+            <div className="bg-blue-50 p-4 rounded-lg space-y-3">
+              <h3 className="text-sm font-medium text-blue-800">Configuração do Parcelamento</h3>
+              
+              {/* Down Payment Option */}
+              <div className="bg-white p-3 rounded border border-blue-200">
+                <div className="flex items-center mb-3">
+                  <input
+                    type="checkbox"
+                    id="hasDownPayment"
+                    checked={hasDownPayment}
+                    onChange={(e) => setHasDownPayment(e.target.checked)}
+                    className="h-4 w-4 text-purple-600 focus:ring-purple-500 border-gray-300 rounded"
+                  />
+                  <label htmlFor="hasDownPayment" className="ml-2 text-sm font-medium text-gray-700">
+                    Incluir Entrada
+                  </label>
+                </div>
+                
+                {hasDownPayment && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">
+                        Valor da Entrada (R$)
+                      </label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={downPaymentAmount}
+                        onChange={(e) => setDownPaymentAmount(e.target.value)}
+                        className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500"
+                        placeholder="0.00"
+                      />
+                    </div>
+                    <div className="flex items-center">
+                      <input
+                        type="checkbox"
+                        id="downPaymentReceived"
+                        checked={downPaymentReceived}
+                        onChange={(e) => setDownPaymentReceived(e.target.checked)}
+                        className="h-4 w-4 text-purple-600 focus:ring-purple-500 border-gray-300 rounded"
+                      />
+                      <label htmlFor="downPaymentReceived" className="ml-2 text-xs text-gray-700">
+                        Entrada já recebida
+                      </label>
+                    </div>
+                  </div>
+                )}
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    Número de Parcelas
+                  </label>
+                  <input
+                    type="number"
+                    min="2"
+                    max="24"
+                    value={installmentCount}
+                    onChange={(e) => setInstallmentCount(Number(e.target.value))}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    Intervalo
+                  </label>
+                  <select
+                    value={installmentInterval}
+                    onChange={(e) => setInstallmentInterval(e.target.value as 'monthly' | 'weekly' | 'custom')}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  >
+                    <option value="monthly">Mensal</option>
+                    <option value="weekly">Semanal</option>
+                  </select>
+                </div>
+              </div>
+              
+              <div className="text-xs text-blue-700 space-y-1">
+                {hasDownPayment ? (
+                  <>
+                    <div>💡 <strong>Entrada:</strong> Valor fixo pago no início</div>
+                    <div>📅 <strong>Parcelas:</strong> Valor restante dividido em {installmentCount} parcelas iguais</div>
+                    <div>⏰ <strong>Datas:</strong> Entrada na data informada, parcelas começam no próximo período</div>
+                  </>
+                ) : (
+                  <div>💡 O valor será dividido igualmente entre as parcelas.</div>
+                )}
+              </div>
+            </div>
+          )}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label htmlFor="amount" className="block text-sm font-medium text-gray-700 mb-1">
-                {t('common.amount')} ({t('currency')}) *
+                {isCreatingInstallments ? 'Valor Total' : t('common.amount')} ({t('currency')}) *
               </label>
               <input
                 type="number"
@@ -571,7 +757,7 @@ const PaymentsPage: React.FC = () => {
 
             <div>
               <label htmlFor="paymentDate" className="block text-sm font-medium text-gray-700 mb-1">
-                {t('payments.fields.paymentDate')} *
+                {isCreatingInstallments ? 'Data da 1ª Parcela' : t('payments.fields.paymentDate')} *
               </label>
               <input
                 type="date"
@@ -605,17 +791,33 @@ const PaymentsPage: React.FC = () => {
             )}
           </div>
 
-          <div className="flex items-center">
-            <input
-              type="checkbox"
-              id="received"
-              {...register('received')}
-              className="h-4 w-4 text-purple-600 focus:ring-purple-500 border-gray-300 rounded"
-            />
-            <label htmlFor="received" className="ml-2 block text-sm text-gray-900">
-              {t('payments.paymentReceived')}
-            </label>
-          </div>
+          {!isCreatingInstallments && (
+            <div className="flex items-center">
+              <input
+                type="checkbox"
+                id="received"
+                {...register('received')}
+                className="h-4 w-4 text-purple-600 focus:ring-purple-500 border-gray-300 rounded"
+              />
+              <label htmlFor="received" className="ml-2 block text-sm text-gray-900">
+                {t('payments.paymentReceived')}
+              </label>
+            </div>
+          )}
+          
+          {isCreatingInstallments && (
+            <div className="flex items-center">
+              <input
+                type="checkbox"
+                id="received"
+                {...register('received')}
+                className="h-4 w-4 text-purple-600 focus:ring-purple-500 border-gray-300 rounded"
+              />
+              <label htmlFor="received" className="ml-2 block text-sm text-gray-900">
+                Primeira parcela já foi recebida
+              </label>
+            </div>
+          )}
 
           <div>
             <label htmlFor="notes" className="block text-sm font-medium text-gray-700 mb-1">
@@ -626,6 +828,7 @@ const PaymentsPage: React.FC = () => {
               rows={3}
               {...register('notes')}
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              placeholder={isCreatingInstallments ? "Observações gerais para todas as parcelas" : "Observações do pagamento"}
             />
           </div>
 
@@ -634,7 +837,14 @@ const PaymentsPage: React.FC = () => {
               {t('common.cancel')}
             </Button>
             <Button type="submit">
-              {editingPayment ? t('common.update') : t('common.create')} {t('navigation.payments')}
+              {editingPayment 
+                ? t('common.update') 
+                : isCreatingInstallments 
+                  ? hasDownPayment 
+                    ? `Criar Entrada + ${installmentCount} Parcelas`
+                    : `Criar ${installmentCount} Parcelas`
+                  : t('common.create')
+              } {!editingPayment && !isCreatingInstallments ? t('navigation.payments') : ''}
             </Button>
           </div>
         </form>
