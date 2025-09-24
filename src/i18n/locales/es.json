@@ -27,6 +27,10 @@
     "payments": "Pagos",
     "calendar": "Calendario",
     "reports": "Informes",
+    "suppliers": "Proveedores",
+    "products": "Productos/Servicios",
+    "proposals": "Propuestas",
+    "subscription": "Planes",
     "logout": "Cerrar Sesión"
   },
   "landing": {
@@ -103,6 +107,9 @@
     "allStatus": "Todos los Estados",
     "newClient": "¿Cliente nuevo?",
     "newClientData": "Datos del Nuevo Cliente",
+    "checklist": "Lista de Verificación",
+    "timeline": "Cronograma",
+    "suppliers": "Proveedores",
     "types": {
       "wedding": "Boda",
       "debutante": "Quinceañera",
@@ -197,6 +204,70 @@
   "reports": {
     "title": "Informes",
     "subtitle": "Informes y análisis próximamente..."
+  },
+  "suppliers": {
+    "title": "Proveedores",
+    "subtitle": "Gestiona tu red de proveedores",
+    "addSupplier": "Agregar Proveedor",
+    "editSupplier": "Editar Proveedor",
+    "addNewSupplier": "Agregar Nuevo Proveedor",
+    "searchSuppliers": "Buscar proveedores...",
+    "noSuppliersFound": "No se encontraron proveedores",
+    "deleteConfirm": "¿Estás seguro de que quieres eliminar este proveedor?",
+    "fields": {
+      "name": "Nombre",
+      "service": "Servicio",
+      "contact": "Contacto",
+      "phone": "Teléfono",
+      "email": "Correo Electrónico",
+      "notes": "Notas"
+    }
+  },
+  "products": {
+    "title": "Productos/Servicios",
+    "subtitle": "Gestiona tu catálogo de productos y servicios",
+    "addProduct": "Agregar Producto/Servicio",
+    "editProduct": "Editar Producto/Servicio",
+    "addNewProduct": "Agregar Nuevo Producto/Servicio",
+    "searchProducts": "Buscar productos/servicios...",
+    "noProductsFound": "No se encontraron productos/servicios",
+    "deleteConfirm": "¿Estás seguro de que quieres eliminar este producto/servicio?",
+    "fields": {
+      "name": "Nombre",
+      "price": "Precio",
+      "description": "Descripción"
+    }
+  },
+  "proposals": {
+    "title": "Propuestas",
+    "subtitle": "Gestiona tus propuestas comerciales",
+    "addProposal": "Nueva Propuesta",
+    "editProposal": "Editar Propuesta",
+    "addNewProposal": "Agregar Nueva Propuesta",
+    "searchProposals": "Buscar propuestas...",
+    "noProposalsFound": "No se encontraron propuestas",
+    "deleteConfirm": "¿Estás seguro de que quieres eliminar esta propuesta?",
+    "fields": {
+      "client": "Cliente",
+      "title": "Título",
+      "description": "Descripción",
+      "validUntil": "Válida Hasta",
+      "items": "Artículos",
+      "totalAmount": "Cantidad Total"
+    }
+  },
+  "subscription": {
+    "title": "Planes",
+    "subtitle": "Elige el plan ideal para tu negocio",
+    "currentPlan": "Plan Actual",
+    "choosePlan": "Elegir Plan",
+    "upgrade": "Actualizar",
+    "plans": {
+      "free": "Gratuito",
+      "basic": "Básico",
+      "professional": "Profesional",
+      "premium": "Premium"
+    }
   },
   "currency": "$"
 }

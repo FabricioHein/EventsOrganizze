@@ -1,8 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { useAuth } from '../contexts/AuthContext';
+import { useData } from '../contexts/DataContext';
 import { useTranslation } from 'react-i18next';
-import { getEvents, getPayments, getClients } from '../services/firebaseService';
-import { Event, Payment, Client } from '../types';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
 import { Calendar, DollarSign, TrendingUp, Filter, Download, Users, CheckCircle, XCircle } from 'lucide-react';
 import Button from '../components/ui/Button';
@@ -10,12 +8,8 @@ import { format, startOfMonth, endOfMonth, isWithinInterval, parseISO } from 'da
 import { ptBR } from 'date-fns/locale';
 
 const ReportsPage: React.FC = () => {
-  const { user } = useAuth();
+  const { events, payments, clients, products, loading } = useData();
   const { t } = useTranslation();
-  const [events, setEvents] = useState<Event[]>([]);
-  const [payments, setPayments] = useState<Payment[]>([]);
-  const [clients, setClients] = useState<Client[]>([]);
-  const [loading, setLoading] = useState(true);
 
   // Filters
   const [selectedEventType, setSelectedEventType] = useState<string>('all');
@@ -23,30 +17,6 @@ const ReportsPage: React.FC = () => {
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
   const [paymentStatus, setPaymentStatus] = useState<string>('all');
-
-  useEffect(() => {
-    fetchData();
-  }, [user]);
-
-  const fetchData = async () => {
-    if (!user) return;
-
-    try {
-      const [eventsData, paymentsData, clientsData] = await Promise.all([
-        getEvents(user.uid),
-        getPayments(user.uid),
-        getClients(user.uid),
-      ]);
-      
-      setEvents(eventsData);
-      setPayments(paymentsData);
-      setClients(clientsData);
-    } catch (error) {
-      console.error('Error fetching data:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   // Filter data based on selected filters
   const filteredEvents = events.filter(event => {
@@ -258,7 +228,9 @@ const ReportsPage: React.FC = () => {
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500"
             />
           </div>
-
+        </div>
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Status do Pagamento
@@ -272,6 +244,25 @@ const ReportsPage: React.FC = () => {
               <option value="received">Recebidos</option>
               <option value="pending">Pendentes</option>
             </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Limpar Filtros
+            </label>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setSelectedEventType('all');
+                setSelectedEvent('all');
+                setStartDate('');
+                setEndDate('');
+                setPaymentStatus('all');
+              }}
+              className="w-full"
+            >
+              Limpar Todos os Filtros
+            </Button>
           </div>
         </div>
       </div>
@@ -444,13 +435,13 @@ const ReportsPage: React.FC = () => {
             {filteredEvents
               .sort((a, b) => b.contractTotal - a.contractTotal)
               .slice(0, 5)
-              .map((event) => (
+              .map(event => (
                 <div key={event.id} className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
                   <div>
                     <p className="font-medium text-gray-900">{event.name}</p>
-                    <p className="text-sm text-gray-600">{event.clientName}</p>
+                    <p className="text-sm text-gray-600">{format(event.date, 'dd/MM/yyyy')}</p>
                   </div>
-                  <p className="font-bold text-gray-900">
+                  <p className="font-semibold text-purple-600">
                     {t('currency')} {event.contractTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                   </p>
                 </div>
@@ -458,31 +449,29 @@ const ReportsPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Recent Payments */}
+        {/* Top Clients by Revenue */}
         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Pagamentos Recentes</h3>
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">Clientes com Maior Receita</h3>
           <div className="space-y-3">
-            {filteredPayments
-              .sort((a, b) => b.paymentDate.getTime() - a.paymentDate.getTime())
+            {Object.entries(
+              filteredPayments
+                .filter(p => p.received)
+                .reduce((acc, payment) => {
+                  const client = clients.find(c => c.id === payment.clientId);
+                  if (client) {
+                    acc[client.name] = (acc[client.name] || 0) + payment.amount;
+                  }
+                  return acc;
+                }, {} as Record<string, number>)
+            )
+              .sort(([, a], [, b]) => b - a)
               .slice(0, 5)
-              .map((payment) => (
-                <div key={payment.id} className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
-                  <div>
-                    <p className="font-medium text-gray-900">{payment.eventName}</p>
-                    <p className="text-sm text-gray-600">
-                      {format(payment.paymentDate, 'dd/MM/yyyy')} • {t(`payments.methods.${payment.method}`)}
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <p className="font-bold text-gray-900">
-                      {t('currency')} {payment.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                    </p>
-                    <span className={`inline-block px-2 py-1 text-xs rounded-full ${
-                      payment.received ? 'bg-green-100 text-green-800' : 'bg-orange-100 text-orange-800'
-                    }`}>
-                      {payment.received ? 'Recebido' : 'Pendente'}
-                    </span>
-                  </div>
+              .map(([clientName, amount]) => (
+                <div key={clientName} className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
+                  <p className="font-medium text-gray-900">{clientName}</p>
+                  <p className="font-semibold text-green-600">
+                    {t('currency')} {amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                  </p>
                 </div>
               ))}
           </div>
@@ -493,3 +482,4 @@ const ReportsPage: React.FC = () => {
 };
 
 export default ReportsPage;
+              

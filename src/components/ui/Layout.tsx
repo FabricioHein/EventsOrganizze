@@ -14,6 +14,7 @@ import {
   Truck,
   FileText,
   Crown,
+  Package,
 } from 'lucide-react';
 import LanguageSelector from './LanguageSelector';
 
@@ -35,9 +36,10 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     { name: t('navigation.payments'), href: '/payments', icon: DollarSign },
     { name: t('navigation.calendar'), href: '/calendar', icon: CalendarIcon },
     { name: t('navigation.reports'), href: '/reports', icon: BarChart3 },
-    { name: 'Fornecedores', href: '/suppliers', icon: Truck },
-    { name: 'Propostas', href: '/proposals', icon: FileText },
-    { name: 'Planos', href: '/subscription', icon: Crown },
+    { name: t('navigation.suppliers'), href: '/suppliers', icon: Truck },
+    { name: t('navigation.products'), href: '/products', icon: Package },
+    { name: t('navigation.proposals'), href: '/proposals', icon: FileText },
+    { name: t('navigation.subscription'), href: '/subscription', icon: Crown },
   ];
 
   const handleLogout = async () => {

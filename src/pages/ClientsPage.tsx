@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from 'react-i18next';
-import { getClients, addClient, updateClient, deleteClient } from '../services/firebaseService';
+import { getClients, addClient, updateClient, deleteClient, uploadClientPhoto } from '../services/firebaseService';
 import { Client } from '../types';
-import { Plus, Search, Edit2, Trash2, Phone, Mail } from 'lucide-react';
+import { Plus, Search, Edit2, Trash2, Phone, Mail, User, Upload } from 'lucide-react';
 import Button from '../components/ui/Button';
 import Modal from '../components/ui/Modal';
 import { useForm } from 'react-hook-form';
@@ -16,6 +16,8 @@ const ClientsPage: React.FC = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingClient, setEditingClient] = useState<Client | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
+
+  const [uploadingPhoto, setUploadingPhoto] = useState<string | null>(null);
 
   const { register, handleSubmit, reset, setValue, formState: { errors } } = useForm<Omit<Client, 'id' | 'createdAt' | 'userId'>>();
 
@@ -58,6 +60,10 @@ const ClientsPage: React.FC = () => {
     setValue('name', client.name);
     setValue('phone', client.phone);
     setValue('email', client.email);
+    setValue('instagram', client.instagram || '');
+    setValue('facebook', client.facebook || '');
+    setValue('whatsapp', client.whatsapp || '');
+    setValue('photoURL', client.photoURL || '');
     setValue('notes', client.notes || '');
     setIsModalOpen(true);
   };
@@ -70,6 +76,34 @@ const ClientsPage: React.FC = () => {
       } catch (error) {
         console.error('Error deleting client:', error);
       }
+    }
+  };
+
+  const handlePhotoUpload = async (clientId: string, file: File) => {
+    if (!file) return;
+    
+    // Validate file size (5MB max)
+    if (file.size > 5 * 1024 * 1024) {
+      alert('Arquivo muito grande. Máximo 5MB.');
+      return;
+    }
+    
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      alert('Por favor, selecione apenas arquivos de imagem.');
+      return;
+    }
+    
+    setUploadingPhoto(clientId);
+    try {
+      const photoURL = await uploadClientPhoto(clientId, file);
+      await updateClient(clientId, { photoURL });
+      await fetchClients();
+    } catch (error) {
+      console.error('Error uploading photo:', error);
+      alert('Erro ao fazer upload da foto. Tente novamente.');
+    } finally {
+      setUploadingPhoto(null);
     }
   };
 
@@ -123,8 +157,83 @@ const ClientsPage: React.FC = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {filteredClients.map((client) => (
           <div key={client.id} className="bg-white p-6 rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
+            <div className="flex items-center mb-4">
+              <div className="relative mr-4">
+                {client.photoURL ? (
+                  <img
+                    src={client.photoURL}
+                    alt={client.name}
+                    className="w-12 h-12 rounded-full object-cover"
+                  />
+                ) : (
+                  <div className="w-12 h-12 bg-gray-200 rounded-full flex items-center justify-center">
+                    <User size={24} className="text-gray-400" />
+                  </div>
+                )}
+                <label className="absolute -bottom-1 -right-1 bg-purple-600 text-white rounded-full p-1 cursor-pointer hover:bg-purple-700 transition-colors">
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        handlePhotoUpload(client.id, file);
+                      }
+                    }}
+                    disabled={uploadingPhoto === client.id}
+                  />
+                  {uploadingPhoto === client.id ? (
+                    <div className="w-3 h-3 border border-white border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    <Upload size={12} />
+                  )}
+                </label>
+              </div>
+              <div className="flex-1">
+                <h3 className="text-lg font-semibold text-gray-900">{client.name}</h3>
+              </div>
+            </div>
+            
             <div className="flex justify-between items-start mb-4">
-              <h3 className="text-lg font-semibold text-gray-900">{client.name}</h3>
+              <div className="flex-1">
+                {/* Social Media Links */}
+                <div className="flex space-x-2 mb-2">
+                  {client.instagram && (
+                    <a
+                      href={`https://instagram.com/${client.instagram.replace('@', '')}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-pink-500 hover:text-pink-600"
+                      title="Instagram"
+                    >
+                      📷
+                    </a>
+                  )}
+                  {client.facebook && (
+                    <a
+                      href={client.facebook.startsWith('http') ? client.facebook : `https://facebook.com/${client.facebook}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-600 hover:text-blue-700"
+                      title="Facebook"
+                    >
+                      📘
+                    </a>
+                  )}
+                  {client.whatsapp && (
+                    <a
+                      href={`https://wa.me/${client.whatsapp.replace(/\D/g, '')}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-green-500 hover:text-green-600"
+                      title="WhatsApp"
+                    >
+                      💬
+                    </a>
+                  )}
+                </div>
+              </div>
               <div className="flex space-x-2">
                 <button
                   onClick={() => handleEdit(client)}
@@ -219,6 +328,85 @@ const ClientsPage: React.FC = () => {
             {errors.email && (
               <p className="text-red-500 text-sm mt-1">{errors.email.message}</p>
             )}
+          </div>
+
+          {/* Social Media Fields */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label htmlFor="instagram" className="block text-sm font-medium text-gray-700 mb-1">
+                Instagram
+              </label>
+              <input
+                type="text"
+                id="instagram"
+                {...register('instagram')}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                placeholder="@usuario"
+              />
+            </div>
+
+            <div>
+              <label htmlFor="facebook" className="block text-sm font-medium text-gray-700 mb-1">
+                Facebook
+              </label>
+              <input
+                type="text"
+                id="facebook"
+                {...register('facebook')}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                placeholder="facebook.com/usuario"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label htmlFor="whatsapp" className="block text-sm font-medium text-gray-700 mb-1">
+              WhatsApp
+            </label>
+            <input
+              type="tel"
+              id="whatsapp"
+              {...register('whatsapp')}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              placeholder="(11) 99999-9999"
+            />
+          </div>
+
+          <div>
+            <label htmlFor="photoURL" className="block text-sm font-medium text-gray-700 mb-1">
+              Foto do Cliente
+            </label>
+            <div className="flex items-center space-x-4">
+              <div className="flex-shrink-0">
+                {editingClient?.photoURL ? (
+                  <img
+                    src={editingClient.photoURL}
+                    alt="Preview"
+                    className="w-16 h-16 rounded-full object-cover"
+                  />
+                ) : (
+                  <div className="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center">
+                    <User size={32} className="text-gray-400" />
+                  </div>
+                )}
+              </div>
+              <div className="flex-1">
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file && editingClient) {
+                      handlePhotoUpload(editingClient.id, file);
+                    }
+                  }}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Formatos aceitos: JPG, PNG, GIF (máx. 5MB)
+                </p>
+              </div>
+            </div>
           </div>
 
           <div>

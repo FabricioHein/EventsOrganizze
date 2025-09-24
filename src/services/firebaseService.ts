@@ -14,7 +14,7 @@ import {
 } from 'firebase/firestore';
 import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { db } from '../lib/firebase';
-import { Client, Event, Payment } from '../types';
+import { Client, Event, Payment, Product, EventProduct, Supplier, EventSupplier, Proposal, EventTimeline, UserSubscription } from '../types';
 
 const storage = getStorage();
 
@@ -377,4 +377,74 @@ export const createSubscription = async (subscription: Omit<UserSubscription, 'i
     createdAt: Timestamp.now(),
   });
   return docRef.id;
+};
+
+// Products
+export const addProduct = async (product: Omit<Product, 'id' | 'createdAt'>) => {
+  const docRef = await addDoc(collection(db, 'products'), {
+    ...product,
+    createdAt: Timestamp.now(),
+  });
+  return docRef.id;
+};
+
+export const getProducts = async (userId: string): Promise<Product[]> => {
+  const q = query(
+    collection(db, 'products'),
+    where('userId', '==', userId),
+    orderBy('createdAt', 'desc')
+  );
+  const querySnapshot = await getDocs(q);
+  return querySnapshot.docs.map(doc => ({
+    id: doc.id,
+    ...doc.data(),
+    createdAt: doc.data().createdAt.toDate(),
+  })) as Product[];
+};
+
+export const updateProduct = async (id: string, product: Partial<Product>) => {
+  const docRef = doc(db, 'products', id);
+  await updateDoc(docRef, product);
+};
+
+export const deleteProduct = async (id: string) => {
+  await deleteDoc(doc(db, 'products', id));
+};
+
+// Event Products
+export const addEventProduct = async (eventProduct: Omit<EventProduct, 'id' | 'createdAt'>) => {
+  const docRef = await addDoc(collection(db, 'eventProducts'), {
+    ...eventProduct,
+    createdAt: Timestamp.now(),
+  });
+  return docRef.id;
+};
+
+export const getEventProducts = async (eventId: string): Promise<EventProduct[]> => {
+  const q = query(
+    collection(db, 'eventProducts'),
+    where('eventId', '==', eventId),
+    orderBy('createdAt', 'desc')
+  );
+  const querySnapshot = await getDocs(q);
+  return querySnapshot.docs.map(doc => ({
+    id: doc.id,
+    ...doc.data(),
+    createdAt: doc.data().createdAt.toDate(),
+  })) as EventProduct[];
+};
+
+export const deleteEventProduct = async (id: string) => {
+  await deleteDoc(doc(db, 'eventProducts', id));
+};
+
+// Client Photo Upload
+export const uploadClientPhoto = async (clientId: string, file: File): Promise<string> => {
+  const fileName = `${Date.now()}_${file.name}`;
+  const storageRef = ref(storage, `client-photos/${clientId}/${fileName}`);
+  
+  await uploadBytes(storageRef, file);
+  const url = await getDownloadURL(storageRef);
+  
+  return url;
 };

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Plus, Trash2, Calendar, DollarSign } from 'lucide-react';
+import { Plus, Trash2, Calendar, DollarSign, Info } from 'lucide-react';
 import Modal from './Modal';
 import Button from './Button';
 import { format, addMonths, addDays } from 'date-fns';
@@ -32,11 +32,15 @@ const PaymentInstallmentsModal: React.FC<PaymentInstallmentsModalProps> = ({
       amount: 0,
       paymentDate: new Date(),
       method: 'pix',
-      notes: 'Entrada',
+      notes: '',
       received: false,
     },
   ]);
-  const [numberOfInstallments, setNumberOfInstallments] = useState<number>(1);
+  const [numberOfInstallments, setNumberOfInstallments] = useState<number>(2);
+  const [hasDownPayment, setHasDownPayment] = useState(false);
+  const [downPaymentAmount, setDownPaymentAmount] = useState<string>('');
+  const [downPaymentReceived, setDownPaymentReceived] = useState(false);
+  const [installmentInterval, setInstallmentInterval] = useState<'monthly' | 'weekly'>('monthly');
   const [loading, setLoading] = useState(false);
 
   const addInstallment = () => {
@@ -65,39 +69,50 @@ const PaymentInstallmentsModal: React.FC<PaymentInstallmentsModalProps> = ({
     setInstallments(updated);
   };
 
-  const generateEqualInstallments = (count: number) => {
-    const installmentAmount = Math.round((contractTotal / count) * 100) / 100;
-    const remainder = contractTotal - (installmentAmount * count);
-    
-    const newInstallments: PaymentInstallment[] = [];
-    for (let i = 0; i < count; i++) {
-      newInstallments.push({
-        amount: i === 0 ? installmentAmount + remainder : installmentAmount,
-        paymentDate: i === 0 ? new Date() : addMonths(new Date(), i),
-        method: 'pix',
-        notes: i === 0 ? 'Entrada' : `Parcela ${i + 1}`,
-        received: false,
-      });
-    }
-    setInstallments(newInstallments);
-  };
-
   const generateInstallmentsByNumber = (count: number) => {
     if (count < 1) return;
     
-    const installmentAmount = Math.floor((contractTotal / count) * 100) / 100;
-    const remainder = contractTotal - (installmentAmount * count);
-    
+    let totalAmount = contractTotal;
+    let remainingAmount = contractTotal;
     const newInstallments: PaymentInstallment[] = [];
-    for (let i = 0; i < count; i++) {
+    
+    // Add down payment if configured
+    if (hasDownPayment && downPaymentAmount) {
+      const downAmount = Number(downPaymentAmount);
+      remainingAmount -= downAmount;
+      
       newInstallments.push({
-        amount: i === count - 1 ? installmentAmount + remainder : installmentAmount,
-        paymentDate: i === 0 ? new Date() : addMonths(new Date(), i),
+        amount: downAmount,
+        paymentDate: new Date(),
         method: 'pix',
-        notes: i === 0 ? 'Entrada' : `Parcela ${i + 1}`,
-        received: false,
+        notes: 'Entrada',
+        received: downPaymentReceived,
       });
     }
+    
+    // Calculate installment amount for remaining value
+    const installmentAmount = Math.floor((remainingAmount / count) * 100) / 100;
+    const remainder = remainingAmount - (installmentAmount * count);
+    
+    // Add installments
+    for (let i = 0; i < count; i++) {
+      const installmentDate = new Date();
+      
+      if (installmentInterval === 'monthly') {
+        installmentDate.setMonth(installmentDate.getMonth() + (hasDownPayment ? i + 1 : i));
+      } else if (installmentInterval === 'weekly') {
+        installmentDate.setDate(installmentDate.getDate() + ((hasDownPayment ? i + 1 : i) * 7));
+      }
+      
+      newInstallments.push({
+        amount: i === count - 1 ? installmentAmount + remainder : installmentAmount,
+        paymentDate: installmentDate,
+        method: 'pix',
+        notes: `Parcela ${i + 1}/${count}`,
+        received: false, // Installments start as not received
+      });
+    }
+    
     setInstallments(newInstallments);
   };
 
@@ -113,7 +128,6 @@ const PaymentInstallmentsModal: React.FC<PaymentInstallmentsModalProps> = ({
     setLoading(true);
     try {
       await onSave(installments);
-      onClose();
     } catch (error) {
       console.error('Error saving installments:', error);
       alert('Erro ao salvar parcelamento. Tente novamente.');
@@ -127,43 +141,126 @@ const PaymentInstallmentsModal: React.FC<PaymentInstallmentsModalProps> = ({
       <div className="space-y-6">
         {/* Quick Setup */}
         <div className="bg-gray-50 p-4 rounded-lg">
-          <h3 className="text-sm font-medium text-gray-700 mb-3">Configuração Rápida</h3>
+          <h3 className="text-sm font-medium text-gray-700 mb-3">Configuração do Parcelamento</h3>
           
-          {/* Number Input */}
-          <div className="mb-3">
-            <label className="block text-xs font-medium text-gray-700 mb-1">
-              Número de Parcelas
-            </label>
-            <div className="flex items-center space-x-2">
+          {/* Down Payment Option */}
+          <div className="bg-white p-3 rounded border border-gray-200 mb-4">
+            <div className="flex items-center mb-3">
+              <input
+                type="checkbox"
+                id="hasDownPayment"
+                checked={hasDownPayment}
+                onChange={(e) => setHasDownPayment(e.target.checked)}
+                className="h-4 w-4 text-purple-600 focus:ring-purple-500 border-gray-300 rounded"
+              />
+              <label htmlFor="hasDownPayment" className="ml-2 text-sm font-medium text-gray-700">
+                Incluir Entrada
+              </label>
+            </div>
+            
+            {hasDownPayment && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    Valor da Entrada (R$)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={downPaymentAmount}
+                    onChange={(e) => setDownPaymentAmount(e.target.value)}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    placeholder="0.00"
+                  />
+                </div>
+                <div className="flex items-center">
+                  <input
+                    type="checkbox"
+                    id="downPaymentReceived"
+                    checked={downPaymentReceived}
+                    onChange={(e) => setDownPaymentReceived(e.target.checked)}
+                    className="h-4 w-4 text-purple-600 focus:ring-purple-500 border-gray-300 rounded"
+                  />
+                  <label htmlFor="downPaymentReceived" className="ml-2 text-xs text-gray-700">
+                    Entrada já recebida
+                  </label>
+                </div>
+              </div>
+            )}
+          </div>
+          
+          {/* Installment Configuration */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">
+                Número de Parcelas {hasDownPayment ? '(além da entrada)' : ''}
+              </label>
               <input
                 type="number"
                 min="1"
                 max="24"
                 value={numberOfInstallments}
                 onChange={(e) => setNumberOfInstallments(Number(e.target.value))}
-                className="w-20 px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500"
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500"
               />
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => generateInstallmentsByNumber(numberOfInstallments)}
+            </div>
+            
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">
+                Intervalo
+              </label>
+              <select
+                value={installmentInterval}
+                onChange={(e) => setInstallmentInterval(e.target.value as 'monthly' | 'weekly')}
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500"
               >
-                Gerar
-              </Button>
+                <option value="monthly">Mensal</option>
+                <option value="weekly">Semanal</option>
+              </select>
             </div>
           </div>
           
-          <div className="flex flex-wrap gap-2">
+          {/* Quick Buttons */}
+          <div className="flex flex-wrap gap-2 mb-3">
             {[2, 3, 4, 6, 12].map(count => (
               <Button
                 key={count}
                 variant="secondary"
                 size="sm"
-                onClick={() => generateEqualInstallments(count)}
+                onClick={() => {
+                  setNumberOfInstallments(count);
+                  generateInstallmentsByNumber(count);
+                }}
               >
                 {count}x
               </Button>
             ))}
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => generateInstallmentsByNumber(numberOfInstallments)}
+            >
+              Gerar {numberOfInstallments}x
+            </Button>
+          </div>
+          
+          {/* Info Box */}
+          <div className="bg-blue-50 p-3 rounded-lg">
+            <div className="flex items-start">
+              <Info size={16} className="text-blue-600 mr-2 mt-0.5 flex-shrink-0" />
+              <div className="text-xs text-blue-700 space-y-1">
+                {hasDownPayment ? (
+                  <>
+                    <div>💡 <strong>Entrada:</strong> Valor fixo pago no início</div>
+                    <div>📅 <strong>Parcelas:</strong> {numberOfInstallments === 1 ? 'Valor restante em 1 parcela' : `Valor restante dividido em ${numberOfInstallments} parcelas iguais`}</div>
+                    <div>⏰ <strong>Datas:</strong> Entrada na data atual, parcelas começam no próximo período</div>
+                  </>
+                ) : (
+                  <div>💡 {numberOfInstallments === 1 ? 'Pagamento único na data atual.' : `O valor será dividido igualmente entre ${numberOfInstallments} parcelas.`}</div>
+                )}
+              </div>
+            </div>
           </div>
         </div>
 

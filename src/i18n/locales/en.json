@@ -27,6 +27,10 @@
     "payments": "Payments",
     "calendar": "Calendar",
     "reports": "Reports",
+    "suppliers": "Suppliers",
+    "products": "Products/Services",
+    "proposals": "Proposals",
+    "subscription": "Plans",
     "logout": "Logout"
   },
   "landing": {
@@ -103,6 +107,9 @@
     "allStatus": "All Status",
     "newClient": "New client?",
     "newClientData": "New Client Data",
+    "checklist": "Checklist",
+    "timeline": "Timeline",
+    "suppliers": "Suppliers",
     "types": {
       "wedding": "Wedding",
       "debutante": "Debutante",
@@ -198,5 +205,69 @@
     "title": "Reports",
     "subtitle": "Reports and analytics coming soon..."
   },
-  "currency": "R$"
+  "suppliers": {
+    "title": "Suppliers",
+    "subtitle": "Manage your supplier network",
+    "addSupplier": "Add Supplier",
+    "editSupplier": "Edit Supplier",
+    "addNewSupplier": "Add New Supplier",
+    "searchSuppliers": "Search suppliers...",
+    "noSuppliersFound": "No suppliers found",
+    "deleteConfirm": "Are you sure you want to delete this supplier?",
+    "fields": {
+      "name": "Name",
+      "service": "Service",
+      "contact": "Contact",
+      "phone": "Phone",
+      "email": "Email",
+      "notes": "Notes"
+    }
+  },
+  "products": {
+    "title": "Products/Services",
+    "subtitle": "Manage your product and service catalog",
+    "addProduct": "Add Product/Service",
+    "editProduct": "Edit Product/Service",
+    "addNewProduct": "Add New Product/Service",
+    "searchProducts": "Search products/services...",
+    "noProductsFound": "No products/services found",
+    "deleteConfirm": "Are you sure you want to delete this product/service?",
+    "fields": {
+      "name": "Name",
+      "price": "Price",
+      "description": "Description"
+    }
+  },
+  "proposals": {
+    "title": "Proposals",
+    "subtitle": "Manage your commercial proposals",
+    "addProposal": "New Proposal",
+    "editProposal": "Edit Proposal",
+    "addNewProposal": "Add New Proposal",
+    "searchProposals": "Search proposals...",
+    "noProposalsFound": "No proposals found",
+    "deleteConfirm": "Are you sure you want to delete this proposal?",
+    "fields": {
+      "client": "Client",
+      "title": "Title",
+      "description": "Description",
+      "validUntil": "Valid Until",
+      "items": "Items",
+      "totalAmount": "Total Amount"
+    }
+  },
+  "subscription": {
+    "title": "Plans",
+    "subtitle": "Choose the ideal plan for your business",
+    "currentPlan": "Current Plan",
+    "choosePlan": "Choose Plan",
+    "upgrade": "Upgrade",
+    "plans": {
+      "free": "Free",
+      "basic": "Basic",
+      "professional": "Professional",
+      "premium": "Premium"
+    }
+  },
+  "currency": "$"
 }

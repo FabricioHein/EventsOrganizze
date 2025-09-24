@@ -10,6 +10,10 @@ export interface Client {
   name: string;
   phone: string;
   email: string;
+  photoURL?: string;
+  instagram?: string;
+  facebook?: string;
+  whatsapp?: string;
   notes?: string;
   createdAt: Date;
   userId: string;
@@ -36,6 +40,8 @@ export interface Payment {
   id: string;
   eventId: string;
   eventName: string;
+  productId?: string;
+  productName?: string;
   amount: number;
   paymentDate: Date;
   method: 'pix' | 'card' | 'boleto' | 'cash';
@@ -143,4 +149,24 @@ export interface PlanLimits {
   hasTeamFeatures: boolean;
   hasExportFeatures: boolean;
   hasProposalTracking: boolean;
+}
+
+export interface Product {
+  id: string;
+  name: string;
+  price: number;
+  description?: string;
+  createdAt: Date;
+  userId: string;
+}
+
+export interface EventProduct {
+  id: string;
+  eventId: string;
+  productId: string;
+  productName: string;
+  price: number;
+  quantity: number;
+  total: number;
+  createdAt: Date;
 }

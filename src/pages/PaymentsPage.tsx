@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
+import { useData } from '../contexts/DataContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from 'react-i18next';
-import { getPayments, addPayment, updatePayment, deletePayment, getEvents, addPaymentInstallments } from '../services/firebaseService';
-import { Payment, Event } from '../types';
+import { addPayment, updatePayment, deletePayment, addPaymentInstallments, getProducts } from '../services/firebaseService';
+import { Payment } from '../types';
 import { Plus, Search, Edit2, Trash2, DollarSign, Calendar, CheckCircle, XCircle } from 'lucide-react';
 import Button from '../components/ui/Button';
 import Modal from '../components/ui/Modal';
@@ -11,10 +12,9 @@ import { useForm } from 'react-hook-form';
 import { format } from 'date-fns';
 
 const PaymentsPage: React.FC = () => {
+  const { events, payments, products, refreshPayments, refreshEvents, refreshData } = useData();
   const { user } = useAuth();
   const { t } = useTranslation();
-  const [payments, setPayments] = useState<Payment[]>([]);
-  const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingPayment, setEditingPayment] = useState<Payment | null>(null);
@@ -26,8 +26,6 @@ const PaymentsPage: React.FC = () => {
   const [maxAmount, setMaxAmount] = useState<string>('');
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
-  const [showInstallmentsModal, setShowInstallmentsModal] = useState(false);
-  const [selectedEventForInstallments, setSelectedEventForInstallments] = useState<Event | null>(null);
   const [isCreatingInstallments, setIsCreatingInstallments] = useState(false);
   const [installmentCount, setInstallmentCount] = useState<number>(1);
   const [installmentInterval, setInstallmentInterval] = useState<'monthly' | 'weekly' | 'custom'>('monthly');
@@ -38,29 +36,10 @@ const PaymentsPage: React.FC = () => {
   const { register, handleSubmit, reset, setValue, formState: { errors } } = useForm<Omit<Payment, 'id' | 'createdAt' | 'userId' | 'eventName'>>();
 
   useEffect(() => {
-    fetchData();
-  }, [user]);
-
-  const fetchData = async () => {
-    if (!user) return;
-
-    try {
-      const [paymentsData, eventsData] = await Promise.all([
-        getPayments(user.uid),
-        getEvents(user.uid),
-      ]);
-      setPayments(paymentsData);
-      setEvents(eventsData);
-    } catch (error) {
-      console.error('Error fetching data:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+    setLoading(false);
+  }, [events, payments, products]);
 
   const onSubmit = async (data: Omit<Payment, 'id' | 'createdAt' | 'userId' | 'eventName'>) => {
-    if (!user) return;
-
     try {
       const selectedEvent = events.find(e => e.id === data.eventId);
       if (!selectedEvent) return;
@@ -111,7 +90,7 @@ const PaymentsPage: React.FC = () => {
         await addPaymentInstallments(
           selectedEvent.id,
           selectedEvent.name,
-          user.uid,
+          events[0]?.userId || '',
           installments
         );
       } else {
@@ -121,7 +100,7 @@ const PaymentsPage: React.FC = () => {
           paymentDate: new Date(data.paymentDate),
           amount: Number(data.amount),
           eventName: selectedEvent.name,
-          userId: user.uid,
+          userId: user?.uid || '',
         };
 
         if (editingPayment) {
@@ -131,7 +110,8 @@ const PaymentsPage: React.FC = () => {
         }
       }
       
-      await fetchData();
+      // Refresh all data to ensure synchronization between Events and Payments
+      await refreshData();
       handleCloseModal();
     } catch (error) {
       console.error('Error saving payment:', error);
@@ -153,7 +133,8 @@ const PaymentsPage: React.FC = () => {
     if (window.confirm(t('payments.deleteConfirm'))) {
       try {
         await deletePayment(id);
-        await fetchData();
+        // Refresh all data to ensure synchronization between Events and Payments
+        await refreshData();
       } catch (error) {
         console.error('Error deleting payment:', error);
       }
@@ -163,7 +144,8 @@ const PaymentsPage: React.FC = () => {
   const toggleReceived = async (payment: Payment) => {
     try {
       await updatePayment(payment.id, { received: !payment.received });
-      await fetchData();
+      // Refresh all data to ensure synchronization between Events and Payments
+      await refreshData();
     } catch (error) {
       console.error('Error updating payment status:', error);
     }
@@ -175,7 +157,7 @@ const PaymentsPage: React.FC = () => {
   };
 
   const handleSaveInstallments = async (installments: any[]) => {
-    if (!user || !selectedEventForInstallments) return;
+    if (!selectedEventForInstallments) return;
 
     try {
       // First, delete existing payments for this event
@@ -188,12 +170,12 @@ const PaymentsPage: React.FC = () => {
       await addPaymentInstallments(
         selectedEventForInstallments.id,
         selectedEventForInstallments.name,
-        user.uid,
+        user?.uid || '',
         installments
       );
       
-      // Refresh data
-      await fetchData();
+      // Refresh all data to ensure synchronization between Events and Payments
+      await refreshData();
       setShowInstallmentsModal(false);
       setSelectedEventForInstallments(null);
     } catch (error) {
@@ -318,43 +300,6 @@ const PaymentsPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Events for Installments */}
-      {events.length > 0 && (
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200">
-          <div className="px-6 py-4 border-b border-gray-200">
-            <h2 className="text-lg font-semibold text-gray-900">Criar Parcelamento por Evento</h2>
-            <p className="text-sm text-gray-600 mt-1">Selecione um evento para criar um plano de parcelamento</p>
-          </div>
-          <div className="p-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {events.map((event) => (
-                <div key={event.id} className="bg-gray-50 p-4 rounded-lg border border-gray-200 hover:border-purple-300 transition-colors">
-                  <div className="flex justify-between items-start mb-3">
-                    <div className="flex-1">
-                      <h3 className="font-medium text-gray-900 mb-1">{event.name}</h3>
-                      <p className="text-sm text-gray-600">{event.clientName}</p>
-                      <p className="text-sm text-gray-500">{format(event.date, 'dd/MM/yyyy')}</p>
-                    </div>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-lg font-bold text-gray-900">
-                      {t('currency')} {event.contractTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                    </span>
-                    <Button
-                      size="sm"
-                      onClick={() => handleCreateInstallments(event)}
-                      className="bg-green-600 hover:bg-green-700"
-                    >
-                      <DollarSign size={16} className="mr-1" />
-                      Parcelar
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
       {/* Search and Filters */}
       <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200 space-y-4">
         <h2 className="text-lg font-semibold text-gray-900">{t('payments.filters.title')}</h2>
@@ -372,7 +317,7 @@ const PaymentsPage: React.FC = () => {
         </div>
         
         {/* Second row - Filters */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               {t('payments.filters.status')}
@@ -398,7 +343,9 @@ const PaymentsPage: React.FC = () => {
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
             >
               <option value="all">{t('payments.filters.allEvents')}</option>
-              {events.map(event => (
+              {events.filter(event => 
+                payments.some(payment => payment.eventId === event.id)
+              ).map(event => (
                 <option key={event.id} value={event.id}>{event.name}</option>
               ))}
             </select>
@@ -694,11 +641,11 @@ const PaymentsPage: React.FC = () => {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">
-                    Número de Parcelas
+                    Número de Parcelas (além da entrada)
                   </label>
                   <input
                     type="number"
-                    min="2"
+                    min="1"
                     max="24"
                     value={installmentCount}
                     onChange={(e) => setInstallmentCount(Number(e.target.value))}
@@ -725,11 +672,11 @@ const PaymentsPage: React.FC = () => {
                 {hasDownPayment ? (
                   <>
                     <div>💡 <strong>Entrada:</strong> Valor fixo pago no início</div>
-                    <div>📅 <strong>Parcelas:</strong> Valor restante dividido em {installmentCount} parcelas iguais</div>
+                    <div>📅 <strong>Parcelas:</strong> {installmentCount === 1 ? 'Valor restante em 1 parcela' : `Valor restante dividido em ${installmentCount} parcelas iguais`}</div>
                     <div>⏰ <strong>Datas:</strong> Entrada na data informada, parcelas começam no próximo período</div>
                   </>
                 ) : (
-                  <div>💡 O valor será dividido igualmente entre as parcelas.</div>
+                  <div>💡 {installmentCount === 1 ? 'Pagamento único na data informada.' : `O valor será dividido igualmente entre ${installmentCount} parcelas.`}</div>
                 )}
               </div>
             </div>
@@ -841,26 +788,18 @@ const PaymentsPage: React.FC = () => {
                 ? t('common.update') 
                 : isCreatingInstallments 
                   ? hasDownPayment 
-                    ? `Criar Entrada + ${installmentCount} Parcelas`
-                    : `Criar ${installmentCount} Parcelas`
+                    ? installmentCount === 1 
+                      ? 'Criar Entrada + 1 Parcela'
+                      : `Criar Entrada + ${installmentCount} Parcelas`
+                    : installmentCount === 1
+                      ? 'Criar Pagamento'
+                      : `Criar ${installmentCount} Parcelas`
                   : t('common.create')
               } {!editingPayment && !isCreatingInstallments ? t('navigation.payments') : ''}
             </Button>
           </div>
         </form>
       </Modal>
-
-      {/* Payment Installments Modal */}
-      <PaymentInstallmentsModal
-        isOpen={showInstallmentsModal}
-        onClose={() => {
-          setShowInstallmentsModal(false);
-          setSelectedEventForInstallments(null);
-        }}
-        onSave={handleSaveInstallments}
-        eventName={selectedEventForInstallments?.name || ''}
-        contractTotal={selectedEventForInstallments?.contractTotal || 0}
-      />
     </div>
   );
 };

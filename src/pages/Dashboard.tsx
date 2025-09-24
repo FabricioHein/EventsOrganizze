@@ -1,8 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { useAuth } from '../contexts/AuthContext';
+import { useData } from '../contexts/DataContext';
 import { useTranslation } from 'react-i18next';
-import { getEvents, getPayments, getClients } from '../services/firebaseService';
-import { Event, Payment, Client } from '../types';
 import { Calendar, DollarSign, Users, TrendingUp, Plus } from 'lucide-react';
 import { format, startOfMonth, endOfMonth, isWithinInterval, addDays } from 'date-fns';
 import Button from '../components/ui/Button';
@@ -10,38 +8,10 @@ import MonthlyPaymentsModal from '../components/ui/MonthlyPaymentsModal';
 import { useNavigate } from 'react-router-dom';
 
 const Dashboard: React.FC = () => {
-  const { user } = useAuth();
+  const { events, payments, clients, loading } = useData();
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const [events, setEvents] = useState<Event[]>([]);
-  const [payments, setPayments] = useState<Payment[]>([]);
-  const [clients, setClients] = useState<Client[]>([]);
-  const [loading, setLoading] = useState(true);
   const [showMonthlyPayments, setShowMonthlyPayments] = useState(false);
-
-  useEffect(() => {
-    const fetchData = async () => {
-      if (!user) return;
-
-      try {
-        const [eventsData, paymentsData, clientsData] = await Promise.all([
-          getEvents(user.uid),
-          getPayments(user.uid),
-          getClients(user.uid),
-        ]);
-        
-        setEvents(eventsData);
-        setPayments(paymentsData);
-        setClients(clientsData);
-      } catch (error) {
-        console.error('Error fetching dashboard data:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchData();
-  }, [user]);
 
   if (loading) {
     return (
@@ -86,7 +56,7 @@ const Dashboard: React.FC = () => {
         <div>
           <h1 className="text-3xl font-bold text-gray-900">{t('dashboard.title')}</h1>
           <p className="text-gray-600 mt-1">
-            {t('dashboard.welcome', { name: user?.displayName })}
+            {t('dashboard.welcome', { name: 'Usuário' })}
           </p>
         </div>
         <div className="flex space-x-3 mt-4 md:mt-0">

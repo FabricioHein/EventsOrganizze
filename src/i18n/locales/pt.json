@@ -27,6 +27,10 @@
     "payments": "Pagamentos",
     "calendar": "Calendário",
     "reports": "Relatórios",
+    "suppliers": "Fornecedores",
+    "products": "Produtos/Serviços",
+    "proposals": "Propostas",
+    "subscription": "Planos",
     "logout": "Sair"
   },
   "landing": {
@@ -103,6 +107,9 @@
     "allStatus": "Todos os Status",
     "newClient": "Cliente novo?",
     "newClientData": "Dados do Novo Cliente",
+    "checklist": "Checklist",
+    "timeline": "Cronograma",
+    "suppliers": "Fornecedores",
     "types": {
       "wedding": "Casamento",
       "debutante": "Debutante",
@@ -197,6 +204,70 @@
   "reports": {
     "title": "Relatórios",
     "subtitle": "Relatórios e análises em breve..."
+  },
+  "suppliers": {
+    "title": "Fornecedores",
+    "subtitle": "Gerencie sua rede de fornecedores",
+    "addSupplier": "Adicionar Fornecedor",
+    "editSupplier": "Editar Fornecedor",
+    "addNewSupplier": "Adicionar Novo Fornecedor",
+    "searchSuppliers": "Pesquisar fornecedores...",
+    "noSuppliersFound": "Nenhum fornecedor encontrado",
+    "deleteConfirm": "Tem certeza que deseja excluir este fornecedor?",
+    "fields": {
+      "name": "Nome",
+      "service": "Serviço",
+      "contact": "Contato",
+      "phone": "Telefone",
+      "email": "E-mail",
+      "notes": "Observações"
+    }
+  },
+  "products": {
+    "title": "Produtos/Serviços",
+    "subtitle": "Gerencie seu catálogo de produtos e serviços",
+    "addProduct": "Adicionar Produto/Serviço",
+    "editProduct": "Editar Produto/Serviço",
+    "addNewProduct": "Adicionar Novo Produto/Serviço",
+    "searchProducts": "Pesquisar produtos/serviços...",
+    "noProductsFound": "Nenhum produto/serviço encontrado",
+    "deleteConfirm": "Tem certeza que deseja excluir este produto/serviço?",
+    "fields": {
+      "name": "Nome",
+      "price": "Preço",
+      "description": "Descrição"
+    }
+  },
+  "proposals": {
+    "title": "Propostas",
+    "subtitle": "Gerencie suas propostas comerciais",
+    "addProposal": "Nova Proposta",
+    "editProposal": "Editar Proposta",
+    "addNewProposal": "Adicionar Nova Proposta",
+    "searchProposals": "Pesquisar propostas...",
+    "noProposalsFound": "Nenhuma proposta encontrada",
+    "deleteConfirm": "Tem certeza que deseja excluir esta proposta?",
+    "fields": {
+      "client": "Cliente",
+      "title": "Título",
+      "description": "Descrição",
+      "validUntil": "Válida até",
+      "items": "Itens",
+      "totalAmount": "Valor Total"
+    }
+  },
+  "subscription": {
+    "title": "Planos",
+    "subtitle": "Escolha o plano ideal para seu negócio",
+    "currentPlan": "Plano Atual",
+    "choosePlan": "Escolher Plano",
+    "upgrade": "Fazer Upgrade",
+    "plans": {
+      "free": "Gratuito",
+      "basic": "Básico",
+      "professional": "Profissional",
+      "premium": "Premium"
+    }
   },
   "currency": "R$"
 }
