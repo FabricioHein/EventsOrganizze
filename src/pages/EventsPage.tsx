@@ -1,12 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import { useData } from '../contexts/DataContext';
 import { useAuth } from '../contexts/AuthContext';
+import { useToast } from '../contexts/ToastContext';
+import { useFormValidation } from '../hooks/useFormValidation';
 import { useTranslation } from 'react-i18next';
-import { addEvent, updateEvent, deleteEvent, addClient, addProduct, addEventProduct, getEventProducts, deleteEventProduct, deletePayment } from '../services/firebaseService';
+import { addEvent, updateEvent, deleteEvent, addClient, addProduct, addEventProduct, getEventProducts, deleteEventProduct, deletePayment, addPayment } from '../services/firebaseService';
 import { Event, Client, Product, Payment } from '../types';
-import { Plus, Search, Edit2, Trash2, Calendar, MapPin, User, CheckCircle, Clock, Truck } from 'lucide-react';
+import { Plus, Search, Pencil, Trash2, Calendar, MapPin, User, CheckCircle, Clock, Truck } from 'lucide-react';
 import Button from '../components/ui/Button';
 import Modal from '../components/ui/Modal';
+import DeleteConfirmModal from '../components/ui/DeleteConfirmModal';
 import { uploadContract, deleteContract, addPaymentInstallments } from '../services/firebaseService';
 import { useForm, useFieldArray } from 'react-hook-form';
 import { format } from 'date-fns';
@@ -15,6 +18,7 @@ import EventDetailsModal from '../components/ui/EventDetailsModal';
 const EventsPage: React.FC = () => {
   const { events, payments, clients, products, refreshEvents, refreshPayments, refreshData } = useData();
   const { user } = useAuth();
+  const { showToast } = useToast();
   const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -27,6 +31,10 @@ const EventsPage: React.FC = () => {
   const [isNewClient, setIsNewClient] = useState(false);
   const [selectedProducts, setSelectedProducts] = useState<string[]>([]);
   const [isNewProduct, setIsNewProduct] = useState(false);
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [eventToDelete, setEventToDelete] = useState<Event | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const { showValidation, validationErrors, triggerValidation, clearValidation, getFieldClassName } = useFormValidation();
 
   const { register, handleSubmit, reset, setValue, watch, formState: { errors }, control } = useForm<Omit<Event, 'id' | 'createdAt' | 'userId' | 'clientName'>>();
   const { register: registerClient, formState: { errors: clientErrors }, getValues: getClientValues, reset: resetClient } = useForm<Omit<Client, 'id' | 'createdAt' | 'userId'>>();
@@ -39,6 +47,9 @@ const EventsPage: React.FC = () => {
 
   const watchedClientId = watch('clientId');
   const watchedType = watch('type');
+  const watchedContractTotal = watch('contractTotal');
+  const watchedDiscountType = watch('discountType');
+  const watchedDiscountValue = watch('discountValue');
 
   useEffect(() => {
     setLoading(false);
@@ -62,8 +73,38 @@ const EventsPage: React.FC = () => {
     }
   }, [watchedClientId, watchedType, clients, setValue, t]);
 
+  // Calculate final total with discount
+  const calculateFinalTotal = (contractTotal: number, discountType?: string, discountValue?: number) => {
+    if (!discountValue || discountValue <= 0) return contractTotal;
+    
+    if (discountType === 'percentage') {
+      const discountAmount = (contractTotal * discountValue) / 100;
+      return Math.max(0, contractTotal - discountAmount);
+    } else {
+      return Math.max(0, contractTotal - discountValue);
+    }
+  };
+
+  // Update final total when contract total or discount changes
+  useEffect(() => {
+    if (watchedContractTotal) {
+      const finalTotal = calculateFinalTotal(
+        Number(watchedContractTotal) || 0,
+        watchedDiscountType,
+        Number(watchedDiscountValue) || 0
+      );
+      setValue('finalTotal', finalTotal);
+    }
+  }, [watchedContractTotal, watchedDiscountType, watchedDiscountValue, setValue]);
+
   const onSubmit = async (data: Omit<Event, 'id' | 'createdAt' | 'userId' | 'clientName'>) => {
     if (!user) return;
+
+    // Check for validation errors and highlight fields
+    if (Object.keys(errors).length > 0) {
+      triggerValidation(errors);
+      return;
+    }
 
     try {
       let selectedClient: Client;
@@ -71,8 +112,8 @@ const EventsPage: React.FC = () => {
       if (isNewClient) {
         // Create new client first
         const clientData = getClientValues();
-        if (!clientData.name || !clientData.phone || !clientData.email) {
-          alert('Por favor, preencha todos os campos obrigatórios do cliente.');
+        if (!clientData.name) {
+          alert('Por favor, preencha o nome do cliente.');
           return;
         }
         
@@ -104,6 +145,9 @@ const EventsPage: React.FC = () => {
         ...data,
         date: new Date(data.date),
         contractTotal: Number(data.contractTotal),
+        discountType: data.discountType,
+        discountValue: data.discountValue && Number(data.discountValue) > 0 ? Number(data.discountValue) : null,
+        finalTotal: data.finalTotal ? Number(data.finalTotal) : Number(data.contractTotal),
         clientId: selectedClient.id,
         clientName: selectedClient.name,
         userId: user.uid,
@@ -121,6 +165,26 @@ const EventsPage: React.FC = () => {
         }
       } else {
         eventId = await addEvent(eventData);
+        
+        // Create automatic payment for new event
+        const paymentAmount = eventData.finalTotal || eventData.contractTotal;
+        if (paymentAmount > 0) {
+          const paymentDate = new Date(eventData.date);
+          paymentDate.setDate(paymentDate.getDate() - 7); // 7 days before event
+          
+          await addPayment({
+            eventId: eventId,
+            eventName: eventData.name,
+            amount: paymentAmount,
+            paymentDate: paymentDate,
+            method: 'pix',
+            notes: eventData.discountValue 
+              ? `Pagamento automático (com desconto de ${eventData.discountType === 'percentage' ? eventData.discountValue + '%' : 'R$ ' + eventData.discountValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })})`
+              : 'Pagamento automático gerado',
+            received: false,
+            userId: user.uid,
+          });
+        }
       }
       
       // Link selected products to event
@@ -151,9 +215,23 @@ const EventsPage: React.FC = () => {
       
       await refreshData();
       handleCloseModal();
+      
+      showToast({
+        type: 'success',
+        title: editingEvent ? 'Evento atualizado com sucesso' : 'Evento criado com sucesso',
+        message: editingEvent 
+          ? 'As informações do evento foram atualizadas.' 
+          : (eventData.finalTotal || eventData.contractTotal) > 0
+            ? `O evento foi criado e um pagamento de R$ ${(eventData.finalTotal || eventData.contractTotal).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} foi adicionado automaticamente.`
+            : 'O evento foi criado com sucesso.'
+      });
     } catch (error) {
       console.error('Error saving event:', error);
-      alert('Erro ao salvar evento. Tente novamente.');
+      showToast({
+        type: 'error',
+        title: 'Erro ao salvar evento',
+        message: 'Não foi possível salvar o evento. Verifique os dados e tente novamente.'
+      });
     }
   };
 
@@ -166,6 +244,10 @@ const EventsPage: React.FC = () => {
     setValue('clientId', event.clientId);
     setValue('status', event.status);
     setValue('contractTotal', event.contractTotal as any);
+    setValue('discountType', event.discountType || 'percentage');
+    setValue('discountValue', event.discountValue as any);
+    setValue('finalTotal', event.finalTotal || event.contractTotal as any);
+   setValue('guestCount', event.guestCount as any);
     setValue('details', event.details || '');
     
     // Load linked products
@@ -180,14 +262,38 @@ const EventsPage: React.FC = () => {
     setIsModalOpen(true);
   };
 
-  const handleDelete = async (id: string) => {
-    if (window.confirm(t('events.deleteConfirm'))) {
-      try {
-        await deleteEvent(id);
-        await refreshData();
-      } catch (error) {
-        console.error('Error deleting event:', error);
-      }
+  const handleDeleteClick = (event: Event) => {
+    setEventToDelete(event);
+    setDeleteModalOpen(true);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!eventToDelete) return;
+
+    setDeleteLoading(true);
+    try {
+      const deletedPaymentsCount = await deleteEvent(eventToDelete.id);
+      await refreshData();
+      
+      showToast({
+        type: 'success',
+        title: 'Evento excluído com sucesso',
+        message: deletedPaymentsCount > 0 
+          ? `Evento e ${deletedPaymentsCount} pagamento(s) vinculado(s) excluídos.`
+          : 'O evento foi removido do sistema.'
+      });
+      
+      setDeleteModalOpen(false);
+      setEventToDelete(null);
+    } catch (error) {
+      console.error('Error deleting event:', error);
+      showToast({
+        type: 'error',
+        title: 'Erro ao excluir evento',
+        message: 'Não foi possível excluir o evento e pagamentos vinculados. Tente novamente.'
+      });
+    } finally {
+      setDeleteLoading(false);
     }
   };
 
@@ -197,8 +303,19 @@ const EventsPage: React.FC = () => {
       const { url, fileName } = await uploadContract(eventId, file);
       await updateEvent(eventId, { contractUrl: url, contractFileName: fileName });
       await refreshData();
+      
+      showToast({
+        type: 'success',
+        title: 'Contrato anexado com sucesso',
+        message: 'O contrato foi anexado ao evento.'
+      });
     } catch (error) {
       console.error('Error uploading contract:', error);
+      showToast({
+        type: 'error',
+        title: 'Erro ao anexar contrato',
+        message: 'Não foi possível anexar o contrato. Tente novamente.'
+      });
     } finally {
       setUploadingContract(null);
     }
@@ -224,6 +341,7 @@ const EventsPage: React.FC = () => {
     setIsNewClient(false);
     setIsNewProduct(false);
     setSelectedProducts([]);
+    clearValidation();
     reset();
     resetClient();
     resetProduct();
@@ -336,10 +454,10 @@ const EventsPage: React.FC = () => {
                 <div className="flex space-x-2">
                   <button
                     onClick={() => handleEdit(event)}
-                    className="text-gray-400 hover:text-purple-600 transition-colors"
+                    className="text-gray-400 hover:text-purple-600 transition-colors p-2 rounded-lg hover:bg-purple-50"
                     title={t('common.edit')}
                   >
-                    <Edit2 size={16} />
+                    <Pencil size={16} />
                   </button>
                   <button
                     onClick={() => handleViewEventDetails(event)}
@@ -363,7 +481,7 @@ const EventsPage: React.FC = () => {
                     <Truck size={16} />
                   </button>
                   <button
-                    onClick={() => handleDelete(event.id)}
+                    onClick={() => handleDeleteClick(event)}
                     className="text-gray-400 hover:text-red-600 transition-colors"
                     title={t('common.delete')}
                   >
@@ -389,9 +507,28 @@ const EventsPage: React.FC = () => {
               
               <div className="mt-4 pt-4 border-t border-gray-100 flex justify-between items-center">
                 <span className="text-sm text-gray-500 capitalize">{t(`events.types.${event.type}`)}</span>
-                <span className="text-lg font-bold text-gray-900">
-                  {t('currency')} {event.contractTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                </span>
+                <div className="text-right">
+                  {event.discountValue && event.discountValue > 0 ? (
+                    <>
+                      <div className="text-sm text-gray-500 line-through">
+                        {t('currency')} {event.contractTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                      </div>
+                      <div className="text-lg font-bold text-green-600">
+                        {t('currency')} {(event.finalTotal || event.contractTotal).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                      </div>
+                      <div className="text-xs text-green-600">
+                        Desconto: {event.discountType === 'percentage' 
+                          ? `${event.discountValue}%` 
+                          : `R$ ${event.discountValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
+                        }
+                      </div>
+                    </>
+                  ) : (
+                    <span className="text-lg font-bold text-gray-900">
+                      {t('currency')} {event.contractTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    </span>
+                  )}
+                </div>
               </div>
               
               {/* Payment Summary */}
@@ -508,16 +645,16 @@ const EventsPage: React.FC = () => {
                 <>
                   <select
                     id="clientId"
-                    {...register('clientId', { required: !isNewClient ? t('events.validation.clientRequired') : false })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    {...register('clientId', { required: !isNewClient ? 'Cliente é obrigatório' : false })}
+                    className={getFieldClassName('clientId', 'w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent')}
                   >
                     <option value="">{t('events.fields.selectClient')}</option>
                     {clients.map(client => (
                       <option key={client.id} value={client.id}>{client.name}</option>
                     ))}
                   </select>
-                  {errors.clientId && (
-                    <p className="text-red-500 text-sm mt-1">{errors.clientId.message}</p>
+                  {(showValidation && validationErrors.clientId) && (
+                    <p className="text-red-500 text-sm mt-1 animate-pulse">{validationErrors.clientId}</p>
                   )}
                 </>
               ) : null}
@@ -571,17 +708,9 @@ const EventsPage: React.FC = () => {
                       </label>
                       <input
                         type="email"
-                        {...registerClient('email', {
-                          pattern: {
-                            value: /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i,
-                            message: t('clients.validation.emailInvalid')
-                          }
-                        })}
+                        {...registerClient('email')}
                         className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                       />
-                      {clientErrors.email && (
-                        <p className="text-red-500 text-xs mt-1">{clientErrors.email.message}</p>
-                      )}
                     </div>
                   </div>
                   
@@ -605,8 +734,8 @@ const EventsPage: React.FC = () => {
               </label>
               <select
                 id="type"
-                {...register('type', { required: t('events.validation.typeRequired') })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                {...register('type', { required: 'Tipo de evento é obrigatório' })}
+                className={getFieldClassName('type', 'w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent')}
               >
                 <option value="">{t('events.fields.selectEventType')}</option>
                 <option value="wedding">{t('events.types.wedding')}</option>
@@ -615,8 +744,8 @@ const EventsPage: React.FC = () => {
                 <option value="graduation">{t('events.types.graduation')}</option>
                 <option value="other">{t('events.types.other')}</option>
               </select>
-              {errors.type && (
-                <p className="text-red-500 text-sm mt-1">{errors.type.message}</p>
+              {(showValidation && validationErrors.type) && (
+                <p className="text-red-500 text-sm mt-1 animate-pulse">{validationErrors.type}</p>
               )}
             </div>
           </div>
@@ -628,11 +757,11 @@ const EventsPage: React.FC = () => {
             <input
               type="text"
               id="name"
-              {...register('name', { required: t('events.validation.nameRequired') })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              {...register('name', { required: 'Nome do evento é obrigatório' })}
+              className={getFieldClassName('name', 'w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent')}
             />
-            {errors.name && (
-              <p className="text-red-500 text-sm mt-1">{errors.name.message}</p>
+            {(showValidation && validationErrors.name) && (
+              <p className="text-red-500 text-sm mt-1 animate-pulse">{validationErrors.name}</p>
             )}
           </div>
 
@@ -644,11 +773,11 @@ const EventsPage: React.FC = () => {
               <input
                 type="date"
                 id="date"
-                {...register('date', { required: t('events.validation.dateRequired') })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                {...register('date', { required: 'Data do evento é obrigatória' })}
+                className={getFieldClassName('date', 'w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent')}
               />
-              {errors.date && (
-                <p className="text-red-500 text-sm mt-1">{errors.date.message}</p>
+              {(showValidation && validationErrors.date) && (
+                <p className="text-red-500 text-sm mt-1 animate-pulse">{validationErrors.date}</p>
               )}
             </div>
 
@@ -658,16 +787,16 @@ const EventsPage: React.FC = () => {
               </label>
               <select
                 id="status"
-                {...register('status', { required: t('events.validation.statusRequired') })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                {...register('status', { required: 'Status é obrigatório' })}
+                className={getFieldClassName('status', 'w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent')}
               >
                 <option value="planning">{t('events.status.planning')}</option>
                 <option value="confirmed">{t('events.status.confirmed')}</option>
                 <option value="completed">{t('events.status.completed')}</option>
                 <option value="canceled">{t('events.status.canceled')}</option>
               </select>
-              {errors.status && (
-                <p className="text-red-500 text-sm mt-1">{errors.status.message}</p>
+              {(showValidation && validationErrors.status) && (
+                <p className="text-red-500 text-sm mt-1 animate-pulse">{validationErrors.status}</p>
               )}
             </div>
           </div>
@@ -680,11 +809,11 @@ const EventsPage: React.FC = () => {
               <input
                 type="text"
                 id="location"
-                {...register('location', { required: t('events.validation.locationRequired') })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                {...register('location', { required: 'Local é obrigatório' })}
+                className={getFieldClassName('location', 'w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent')}
               />
-              {errors.location && (
-                <p className="text-red-500 text-sm mt-1">{errors.location.message}</p>
+              {(showValidation && validationErrors.location) && (
+                <p className="text-red-500 text-sm mt-1 animate-pulse">{validationErrors.location}</p>
               )}
             </div>
 
@@ -698,14 +827,118 @@ const EventsPage: React.FC = () => {
                 step="0.01"
                 min="0"
                 {...register('contractTotal', { 
-                  required: t('events.validation.contractRequired'),
-                  min: { value: 0, message: t('events.validation.amountPositive') }
+                  required: 'Total do contrato é obrigatório',
+                  min: { value: 0, message: 'Valor deve ser positivo' }
                 })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                className={getFieldClassName('contractTotal', 'w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent')}
               />
-              {errors.contractTotal && (
-                <p className="text-red-500 text-sm mt-1">{errors.contractTotal.message}</p>
+              {(showValidation && validationErrors.contractTotal) && (
+                <p className="text-red-500 text-sm mt-1 animate-pulse">{validationErrors.contractTotal}</p>
               )}
+            </div>
+
+            <div>
+              <label htmlFor="guestCount" className="block text-sm font-medium text-gray-700 mb-1">
+                Quantidade de Convidados (Estimativa)
+              </label>
+              <input
+                type="number"
+                id="guestCount"
+                min="0"
+                {...register('guestCount')}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                placeholder="Ex: 100"
+              />
+            </div>
+          </div>
+
+          {/* Discount Section */}
+          <div className="bg-gray-50 p-4 rounded-lg space-y-4">
+            <h3 className="text-sm font-medium text-gray-900">Desconto (Opcional)</h3>
+            
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <label htmlFor="discountType" className="block text-sm font-medium text-gray-700 mb-1">
+                  Tipo de Desconto
+                </label>
+                <select
+                  id="discountType"
+                  {...register('discountType')}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                >
+                  <option value="percentage">Percentual (%)</option>
+                  <option value="fixed">Valor Fixo (R$)</option>
+                </select>
+              </div>
+
+              <div>
+                <label htmlFor="discountValue" className="block text-sm font-medium text-gray-700 mb-1">
+                  {watchedDiscountType === 'fixed' ? 'Valor do Desconto (R$)' : 'Percentual (%)'}
+                </label>
+                <input
+                  type="number"
+                  id="discountValue"
+                  step="0.01"
+                  min="0"
+                  max={watchedDiscountType === 'percentage' ? '100' : undefined}
+                  {...register('discountValue')}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                  placeholder={watchedDiscountType === 'fixed' ? '0.00' : '0'}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Valor Final
+                </label>
+                <div className="w-full px-3 py-2 bg-green-50 border border-green-200 rounded-md text-green-800 font-bold">
+                  R$ {calculateFinalTotal(
+                    Number(watchedContractTotal) || 0,
+                    watchedDiscountType,
+                    Number(watchedDiscountValue) || 0
+                  ).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                </div>
+              </div>
+            </div>
+
+            {/* Discount Summary */}
+            {watchedDiscountValue && Number(watchedDiscountValue) > 0 && watchedContractTotal && Number(watchedContractTotal) > 0 && (
+              <div className="bg-white p-3 rounded border border-gray-200">
+                <div className="flex justify-between items-center text-sm">
+                  <span className="text-gray-600">Valor original:</span>
+                  <span className="font-medium">R$ {Number(watchedContractTotal).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                </div>
+                <div className="flex justify-between items-center text-sm">
+                  <span className="text-gray-600">
+                    Desconto ({watchedDiscountType === 'percentage' ? `${watchedDiscountValue}%` : `R$ ${Number(watchedDiscountValue).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`}):
+                  </span>
+                  <span className="font-medium text-red-600">
+                    - R$ {(watchedDiscountType === 'percentage' 
+                      ? (Number(watchedContractTotal) * Number(watchedDiscountValue)) / 100
+                      : Number(watchedDiscountValue)
+                    ).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center text-sm font-bold border-t pt-2 mt-2">
+                  <span className="text-gray-900">Valor final:</span>
+                  <span className="text-green-600">
+                    R$ {calculateFinalTotal(
+                      Number(watchedContractTotal) || 0,
+                      watchedDiscountType,
+                      Number(watchedDiscountValue) || 0
+                    ).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-1 gap-4">
+            <div>
+              <input
+                type="hidden"
+                {...register('finalTotal')}
+              />
             </div>
           </div>
 
@@ -841,6 +1074,26 @@ const EventsPage: React.FC = () => {
           setSelectedEventForDetails(null);
         }}
         event={selectedEventForDetails}
+      />
+
+      {/* Delete Confirmation Modal */}
+      <DeleteConfirmModal
+        isOpen={deleteModalOpen}
+        onClose={() => {
+          setDeleteModalOpen(false);
+          setEventToDelete(null);
+        }}
+        onConfirm={handleDeleteConfirm}
+        title="Excluir Evento"
+        message="Tem certeza que deseja excluir este evento?"
+        itemName={eventToDelete?.name}
+        warningMessage={eventToDelete ? (() => {
+          const eventPayments = payments.filter(p => p.eventId === eventToDelete.id);
+          return eventPayments.length > 0 
+            ? `Atenção: ${eventPayments.length} pagamento(s) vinculado(s) também será(ão) excluído(s) permanentemente.`
+            : undefined;
+        })() : undefined}
+        loading={deleteLoading}
       />
     </div>
   );

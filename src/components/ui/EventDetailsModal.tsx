@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { Event, EventTimeline, ChecklistItem, EventSupplier, Supplier } from '../../types';
 import Modal from './Modal';
 import Button from './Button';
+import DeleteConfirmModal from './DeleteConfirmModal';
+import { useToast } from '../../contexts/ToastContext';
 import { Calendar, Clock, MapPin, User, Plus, Check, X, Trash2 } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -29,12 +31,16 @@ const EventDetailsModal: React.FC<EventDetailsModalProps> = ({
   event,
 }) => {
   const { user } = useAuth();
+  const { showToast } = useToast();
   const [activeTab, setActiveTab] = useState<'timeline' | 'checklist' | 'suppliers'>('timeline');
   const [timeline, setTimeline] = useState<EventTimeline[]>([]);
   const [checklist, setChecklist] = useState<ChecklistItem[]>([]);
   const [eventSuppliers, setEventSuppliers] = useState<EventSupplier[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [loading, setLoading] = useState(false);
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [itemToDelete, setItemToDelete] = useState<{ type: 'timeline' | 'supplier'; id: string; name: string } | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   // New item states
   const [newTimelineItem, setNewTimelineItem] = useState({
@@ -128,8 +134,19 @@ const EventDetailsModal: React.FC<EventDetailsModalProps> = ({
       });
 
       await fetchEventData();
+      
+      showToast({
+        type: 'success',
+        title: 'Item adicionado ao cronograma',
+        message: 'O item foi adicionado com sucesso.'
+      });
     } catch (error) {
       console.error('Error adding timeline item:', error);
+      showToast({
+        type: 'error',
+        title: 'Erro ao adicionar item',
+        message: 'Não foi possível adicionar o item ao cronograma.'
+      });
     }
   };
 
@@ -137,19 +154,60 @@ const EventDetailsModal: React.FC<EventDetailsModalProps> = ({
     try {
       await updateTimelineItem(item.id, { completed: !item.completed });
       await fetchEventData();
+      
+      showToast({
+        type: 'success',
+        title: item.completed ? 'Item desmarcado' : 'Item concluído',
+        message: item.completed ? 'O item foi desmarcado como pendente.' : 'O item foi marcado como concluído.'
+      });
     } catch (error) {
       console.error('Error updating timeline item:', error);
+      showToast({
+        type: 'error',
+        title: 'Erro ao atualizar item',
+        message: 'Não foi possível atualizar o status do item.'
+      });
     }
   };
 
-  const handleDeleteTimelineItem = async (id: string) => {
-    if (window.confirm('Tem certeza que deseja excluir este item?')) {
-      try {
-        await deleteTimelineItem(id);
-        await fetchEventData();
-      } catch (error) {
-        console.error('Error deleting timeline item:', error);
+  const handleDeleteClick = (type: 'timeline' | 'supplier', id: string, name: string) => {
+    setItemToDelete({ type, id, name });
+    setDeleteModalOpen(true);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!itemToDelete) return;
+
+    setDeleteLoading(true);
+    try {
+      if (itemToDelete.type === 'timeline') {
+        await deleteTimelineItem(itemToDelete.id);
+        showToast({
+          type: 'success',
+          title: 'Item excluído do cronograma',
+          message: 'O item foi removido com sucesso.'
+        });
+      } else if (itemToDelete.type === 'supplier') {
+        await deleteEventSupplier(itemToDelete.id);
+        showToast({
+          type: 'success',
+          title: 'Fornecedor removido do evento',
+          message: 'O fornecedor foi desvinculado com sucesso.'
+        });
       }
+      
+      await fetchEventData();
+      setDeleteModalOpen(false);
+      setItemToDelete(null);
+    } catch (error) {
+      console.error('Error deleting item:', error);
+      showToast({
+        type: 'error',
+        title: 'Erro ao excluir',
+        message: 'Não foi possível excluir o item. Tente novamente.'
+      });
+    } finally {
+      setDeleteLoading(false);
     }
   };
 
@@ -165,7 +223,7 @@ const EventDetailsModal: React.FC<EventDetailsModalProps> = ({
         supplierId: supplier.id,
         supplierName: supplier.name,
         service: supplier.service,
-        cost: supplierCost ? Number(supplierCost) : undefined,
+        cost: supplierCost ? Number(supplierCost) : null,
         notes: supplierNotes
       });
 
@@ -173,21 +231,22 @@ const EventDetailsModal: React.FC<EventDetailsModalProps> = ({
       setSupplierCost('');
       setSupplierNotes('');
       await fetchEventData();
+      
+      showToast({
+        type: 'success',
+        title: 'Fornecedor vinculado com sucesso',
+        message: 'O fornecedor foi adicionado ao evento.'
+      });
     } catch (error) {
       console.error('Error adding supplier:', error);
+      showToast({
+        type: 'error',
+        title: 'Erro ao vincular fornecedor',
+        message: 'Não foi possível vincular o fornecedor ao evento.'
+      });
     }
   };
 
-  const handleRemoveSupplier = async (id: string) => {
-    if (window.confirm('Tem certeza que deseja remover este fornecedor?')) {
-      try {
-        await deleteEventSupplier(id);
-        await fetchEventData();
-      } catch (error) {
-        console.error('Error removing supplier:', error);
-      }
-    }
-  };
 
   const handleAddChecklistItem = () => {
     if (!newChecklistItem.title) return;
@@ -386,7 +445,7 @@ const EventDetailsModal: React.FC<EventDetailsModalProps> = ({
                         </div>
                       </div>
                       <button
-                        onClick={() => handleDeleteTimelineItem(item.id)}
+                        onClick={() => handleDeleteClick('timeline', item.id, item.title)}
                         className="text-red-500 hover:text-red-700 p-1"
                       >
                         <Trash2 size={16} />
@@ -556,7 +615,7 @@ const EventDetailsModal: React.FC<EventDetailsModalProps> = ({
                         )}
                       </div>
                       <button
-                        onClick={() => handleRemoveSupplier(eventSupplier.id)}
+                        onClick={() => handleDeleteClick('supplier', eventSupplier.id, eventSupplier.supplierName)}
                         className="text-red-500 hover:text-red-700 p-1"
                       >
                         <Trash2 size={16} />
@@ -582,6 +641,23 @@ const EventDetailsModal: React.FC<EventDetailsModalProps> = ({
           </Button>
         </div>
       </div>
+
+      {/* Delete Confirmation Modal */}
+      <DeleteConfirmModal
+        isOpen={deleteModalOpen}
+        onClose={() => {
+          setDeleteModalOpen(false);
+          setItemToDelete(null);
+        }}
+        onConfirm={handleDeleteConfirm}
+        title={itemToDelete?.type === 'timeline' ? 'Excluir Item do Cronograma' : 'Remover Fornecedor do Evento'}
+        message={itemToDelete?.type === 'timeline' 
+          ? 'Tem certeza que deseja excluir este item do cronograma?' 
+          : 'Tem certeza que deseja remover este fornecedor do evento?'
+        }
+        itemName={itemToDelete?.name}
+        loading={deleteLoading}
+      />
     </Modal>
   );
 };

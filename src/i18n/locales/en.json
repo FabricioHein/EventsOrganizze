@@ -31,6 +31,7 @@
     "products": "Products/Services",
     "proposals": "Proposals",
     "subscription": "Plans",
+    "guests": "Guests",
     "logout": "Logout"
   },
   "landing": {

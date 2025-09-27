@@ -1,7 +1,8 @@
-const ASAAS_API_URL = import.meta.env.VITE_ASAAS_API_URL || 'https://api-sandbox.asaas.com/v3';
+// Asaas API Integration Service
+const ASAAS_API_URL = 'https://www.asaas.com/api/v3';
 const ASAAS_API_KEY = import.meta.env.VITE_ASAAS_API_KEY;
 
-interface AsaasCustomer {
+export interface AsaasCustomer {
   id?: string;
   name: string;
   email: string;
@@ -18,50 +19,65 @@ interface AsaasCustomer {
   country?: string;
 }
 
-interface AsaasSubscription {
+export interface AsaasSubscription {
   id?: string;
   customer: string;
-  billingType: 'BOLETO' | 'CREDIT_CARD' | 'PIX' | 'UNDEFINED';
+  billingType: 'BOLETO' | 'CREDIT_CARD' | 'PIX';
   value: number;
   nextDueDate: string;
-  cycle: 'WEEKLY' | 'BIWEEKLY' | 'MONTHLY' | 'BIMONTHLY' | 'QUARTERLY' | 'SEMIANNUALLY' | 'YEARLY';
-  description?: string;
+  cycle: 'MONTHLY' | 'YEARLY';
+  description: string;
   endDate?: string;
   maxPayments?: number;
-  externalReference?: string;
+  status?: 'ACTIVE' | 'EXPIRED' | 'CANCELLED';
+  creditCard?: {
+    holderName: string;
+    number: string;
+    expiryMonth: string;
+    expiryYear: string;
+    ccv: string;
+  };
+  creditCardHolderInfo?: {
+    name: string;
+    email: string;
+    cpfCnpj: string;
+    postalCode: string;
+    addressNumber: string;
+    phone: string;
+  };
 }
 
-interface AsaasPayment {
+export interface AsaasPayment {
   id?: string;
   customer: string;
-  billingType: 'BOLETO' | 'CREDIT_CARD' | 'PIX' | 'UNDEFINED';
+  billingType: 'BOLETO' | 'CREDIT_CARD' | 'PIX';
   value: number;
   dueDate: string;
-  description?: string;
-  externalReference?: string;
-  installmentCount?: number;
-  installmentValue?: number;
-}
-
-interface AsaasInstallment {
-  installmentCount: number;
-  installmentValue: number;
-  customer: string;
-  billingType: 'BOLETO' | 'CREDIT_CARD' | 'PIX' | 'UNDEFINED';
-  dueDate: string;
-  description?: string;
-  externalReference?: string;
+  description: string;
+  status?: 'PENDING' | 'RECEIVED' | 'CONFIRMED' | 'OVERDUE' | 'REFUNDED' | 'RECEIVED_IN_CASH' | 'REFUND_REQUESTED' | 'CHARGEBACK_REQUESTED' | 'CHARGEBACK_DISPUTE' | 'AWAITING_CHARGEBACK_REVERSAL' | 'DUNNING_REQUESTED' | 'DUNNING_RECEIVED' | 'AWAITING_RISK_ANALYSIS';
+  invoiceUrl?: string;
+  bankSlipUrl?: string;
+  pixQrCode?: string;
+  pixCopyAndPaste?: string;
 }
 
 class AsaasService {
+  private apiKey: string;
+  private baseURL: string;
+
+  constructor() {
+    this.apiKey = ASAAS_API_KEY || '';
+    this.baseURL = ASAAS_API_URL;
+  }
+
   private async makeRequest(endpoint: string, options: RequestInit = {}) {
-    const url = `${ASAAS_API_URL}${endpoint}`;
+    const url = `${this.baseURL}${endpoint}`;
     
     const response = await fetch(url, {
       ...options,
       headers: {
         'Content-Type': 'application/json',
-        'access_token': ASAAS_API_KEY,
+        'access_token': this.apiKey,
         ...options.headers,
       },
     });
@@ -75,94 +91,105 @@ class AsaasService {
   }
 
   // Customer Management
-  async createCustomer(customer: AsaasCustomer) {
+  async createCustomer(customerData: AsaasCustomer): Promise<AsaasCustomer> {
     return this.makeRequest('/customers', {
       method: 'POST',
-      body: JSON.stringify(customer),
+      body: JSON.stringify(customerData),
     });
   }
 
-  async getCustomer(customerId: string) {
+  async getCustomer(customerId: string): Promise<AsaasCustomer> {
     return this.makeRequest(`/customers/${customerId}`);
   }
 
-  async updateCustomer(customerId: string, customer: Partial<AsaasCustomer>) {
+  async updateCustomer(customerId: string, customerData: Partial<AsaasCustomer>): Promise<AsaasCustomer> {
     return this.makeRequest(`/customers/${customerId}`, {
       method: 'PUT',
-      body: JSON.stringify(customer),
+      body: JSON.stringify(customerData),
     });
   }
 
   // Subscription Management
-  async createSubscription(subscription: AsaasSubscription) {
+  async createSubscription(subscriptionData: AsaasSubscription): Promise<AsaasSubscription> {
     return this.makeRequest('/subscriptions', {
       method: 'POST',
-      body: JSON.stringify(subscription),
+      body: JSON.stringify(subscriptionData),
     });
   }
 
-  async getSubscription(subscriptionId: string) {
+  async getSubscription(subscriptionId: string): Promise<AsaasSubscription> {
     return this.makeRequest(`/subscriptions/${subscriptionId}`);
   }
 
-  async getSubscriptions(customerId?: string) {
-    const params = customerId ? `?customer=${customerId}` : '';
-    return this.makeRequest(`/subscriptions${params}`);
+  async updateSubscription(subscriptionId: string, subscriptionData: Partial<AsaasSubscription>): Promise<AsaasSubscription> {
+    return this.makeRequest(`/subscriptions/${subscriptionId}`, {
+      method: 'PUT',
+      body: JSON.stringify(subscriptionData),
+    });
   }
 
-  async cancelSubscription(subscriptionId: string) {
+  async cancelSubscription(subscriptionId: string): Promise<AsaasSubscription> {
     return this.makeRequest(`/subscriptions/${subscriptionId}`, {
       method: 'DELETE',
     });
   }
 
   // Payment Management
-  async createPayment(payment: AsaasPayment) {
+  async createPayment(paymentData: AsaasPayment): Promise<AsaasPayment> {
     return this.makeRequest('/payments', {
       method: 'POST',
-      body: JSON.stringify(payment),
+      body: JSON.stringify(paymentData),
     });
   }
 
-  async createInstallments(installment: AsaasInstallment) {
-    return this.makeRequest('/payments', {
-      method: 'POST',
-      body: JSON.stringify(installment),
-    });
-  }
-
-  async getPayment(paymentId: string) {
+  async getPayment(paymentId: string): Promise<AsaasPayment> {
     return this.makeRequest(`/payments/${paymentId}`);
   }
 
-  async getPayments(customerId?: string) {
-    const params = customerId ? `?customer=${customerId}` : '';
-    return this.makeRequest(`/payments${params}`);
+  async getPaymentsByCustomer(customerId: string): Promise<{ data: AsaasPayment[] }> {
+    return this.makeRequest(`/payments?customer=${customerId}`);
   }
 
-  async cancelPayment(paymentId: string) {
-    return this.makeRequest(`/payments/${paymentId}`, {
-      method: 'DELETE',
-    });
+  // Webhook validation
+  validateWebhook(payload: string, signature: string): boolean {
+    // Implement webhook signature validation according to Asaas documentation
+    // This is a simplified version - implement proper HMAC validation
+    return true;
   }
 
-  // PIX QR Code
-  async getPixQrCode(paymentId: string) {
-    return this.makeRequest(`/payments/${paymentId}/pixQrCode`);
-  }
+  // Plan helpers
+  getPlanConfig(planId: string) {
+    const plans = {
+      basic: {
+        name: 'Plano Básico',
+        value: 99.00,
+        description: 'Plano Básico - Recursos essenciais para seu negócio',
+        features: [
+          'Gestão completa de clientes',
+          'Controle de eventos',
+          'Propostas personalizadas',
+          'Relatórios básicos',
+          'Suporte por email'
+        ]
+      },
+      professional: {
+        name: 'Plano Profissional',
+        value: 149.00,
+        description: 'Plano Profissional - Recursos avançados para crescer',
+        features: [
+          'Tudo do plano básico',
+          'Relatórios avançados',
+          'Automações inteligentes',
+          'Integrações externas',
+          'Suporte prioritário',
+          'API personalizada'
+        ]
+      }
+    };
 
-  // Webhook Management
-  async createWebhook(url: string, events: string[]) {
-    return this.makeRequest('/webhooks', {
-      method: 'POST',
-      body: JSON.stringify({
-        url,
-        events,
-        enabled: true,
-      }),
-    });
+    return plans[planId as keyof typeof plans];
   }
 }
 
 export const asaasService = new AsaasService();
-export type { AsaasCustomer, AsaasSubscription, AsaasPayment, AsaasInstallment };
+export default asaasService;

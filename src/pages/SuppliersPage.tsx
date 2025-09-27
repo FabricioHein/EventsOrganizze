@@ -1,19 +1,27 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { useToast } from '../contexts/ToastContext';
+import { useFormValidation } from '../hooks/useFormValidation';
 import { getSuppliers, addSupplier, updateSupplier, deleteSupplier } from '../services/firebaseService';
 import { Supplier } from '../types';
-import { Plus, Search, Edit2, Trash2, Phone, Mail, Briefcase } from 'lucide-react';
+import { Plus, Search, CreditCard as Edit2, Trash2, Phone, Mail, Briefcase, Pencil } from 'lucide-react';
 import Button from '../components/ui/Button';
 import Modal from '../components/ui/Modal';
+import DeleteConfirmModal from '../components/ui/DeleteConfirmModal';
 import { useForm } from 'react-hook-form';
 
 const SuppliersPage: React.FC = () => {
   const { user } = useAuth();
+  const { showToast } = useToast();
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [supplierToDelete, setSupplierToDelete] = useState<Supplier | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const { showValidation, validationErrors, triggerValidation, clearValidation, getFieldClassName } = useFormValidation();
 
   const { register, handleSubmit, reset, setValue, formState: { errors } } = useForm<Omit<Supplier, 'id' | 'createdAt' | 'userId'>>();
 
@@ -37,6 +45,11 @@ const SuppliersPage: React.FC = () => {
   const onSubmit = async (data: Omit<Supplier, 'id' | 'createdAt' | 'userId'>) => {
     if (!user) return;
 
+    // Check for validation errors and highlight fields
+    if (Object.keys(errors).length > 0) {
+      triggerValidation(errors);
+      return;
+    }
     try {
       if (editingSupplier) {
         await updateSupplier(editingSupplier.id, data);
@@ -46,8 +59,19 @@ const SuppliersPage: React.FC = () => {
       
       await fetchSuppliers();
       handleCloseModal();
+      
+      showToast({
+        type: 'success',
+        title: editingSupplier ? 'Fornecedor atualizado com sucesso' : 'Fornecedor criado com sucesso',
+        message: editingSupplier ? 'As informações do fornecedor foram atualizadas.' : 'O fornecedor foi adicionado à sua rede.'
+      });
     } catch (error) {
       console.error('Error saving supplier:', error);
+      showToast({
+        type: 'error',
+        title: 'Erro ao salvar fornecedor',
+        message: 'Não foi possível salvar o fornecedor. Verifique os dados e tente novamente.'
+      });
     }
   };
 
@@ -62,20 +86,43 @@ const SuppliersPage: React.FC = () => {
     setIsModalOpen(true);
   };
 
-  const handleDelete = async (id: string) => {
-    if (window.confirm('Tem certeza que deseja excluir este fornecedor?')) {
-      try {
-        await deleteSupplier(id);
-        await fetchSuppliers();
-      } catch (error) {
-        console.error('Error deleting supplier:', error);
-      }
+  const handleDeleteClick = (supplier: Supplier) => {
+    setSupplierToDelete(supplier);
+    setDeleteModalOpen(true);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!supplierToDelete) return;
+
+    setDeleteLoading(true);
+    try {
+      await deleteSupplier(supplierToDelete.id);
+      await fetchSuppliers();
+      
+      showToast({
+        type: 'success',
+        title: 'Fornecedor excluído com sucesso',
+        message: 'O fornecedor foi removido da sua rede.'
+      });
+      
+      setDeleteModalOpen(false);
+      setSupplierToDelete(null);
+    } catch (error) {
+      console.error('Error deleting supplier:', error);
+      showToast({
+        type: 'error',
+        title: 'Erro ao excluir fornecedor',
+        message: 'Não foi possível excluir o fornecedor. Tente novamente.'
+      });
+    } finally {
+      setDeleteLoading(false);
     }
   };
 
   const handleCloseModal = () => {
     setIsModalOpen(false);
     setEditingSupplier(null);
+    clearValidation();
     reset();
   };
 
@@ -128,12 +175,13 @@ const SuppliersPage: React.FC = () => {
               <div className="flex space-x-2">
                 <button
                   onClick={() => handleEdit(supplier)}
-                  className="text-gray-400 hover:text-purple-600 transition-colors"
+                  className="text-gray-400 hover:text-purple-600 transition-colors p-2 rounded-lg hover:bg-purple-50"
+                  title="Editar fornecedor"
                 >
-                  <Edit2 size={16} />
+                  <Pencil size={16} />
                 </button>
                 <button
-                  onClick={() => handleDelete(supplier.id)}
+                  onClick={() => handleDeleteClick(supplier)}
                   className="text-gray-400 hover:text-red-600 transition-colors"
                 >
                   <Trash2 size={16} />
@@ -194,10 +242,10 @@ const SuppliersPage: React.FC = () => {
               type="text"
               id="name"
               {...register('name', { required: 'Nome é obrigatório' })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              className={getFieldClassName('name', 'w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent')}
             />
-            {errors.name && (
-              <p className="text-red-500 text-sm mt-1">{errors.name.message}</p>
+            {(showValidation && validationErrors.name) && (
+              <p className="text-red-500 text-sm mt-1 animate-pulse">{validationErrors.name}</p>
             )}
           </div>
 
@@ -209,11 +257,11 @@ const SuppliersPage: React.FC = () => {
               type="text"
               id="service"
               {...register('service', { required: 'Serviço é obrigatório' })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              className={getFieldClassName('service', 'w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent')}
               placeholder="Ex: Decoração, Buffet, Fotografia..."
             />
-            {errors.service && (
-              <p className="text-red-500 text-sm mt-1">{errors.service.message}</p>
+            {(showValidation && validationErrors.service) && (
+              <p className="text-red-500 text-sm mt-1 animate-pulse">{validationErrors.service}</p>
             )}
           </div>
 
@@ -225,11 +273,11 @@ const SuppliersPage: React.FC = () => {
               type="text"
               id="contact"
               {...register('contact', { required: 'Contato é obrigatório' })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              className={getFieldClassName('contact', 'w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent')}
               placeholder="Telefone ou WhatsApp principal"
             />
-            {errors.contact && (
-              <p className="text-red-500 text-sm mt-1">{errors.contact.message}</p>
+            {(showValidation && validationErrors.contact) && (
+              <p className="text-red-500 text-sm mt-1 animate-pulse">{validationErrors.contact}</p>
             )}
           </div>
 
@@ -282,6 +330,20 @@ const SuppliersPage: React.FC = () => {
           </div>
         </form>
       </Modal>
+
+      {/* Delete Confirmation Modal */}
+      <DeleteConfirmModal
+        isOpen={deleteModalOpen}
+        onClose={() => {
+          setDeleteModalOpen(false);
+          setSupplierToDelete(null);
+        }}
+        onConfirm={handleDeleteConfirm}
+        title="Excluir Fornecedor"
+        message="Tem certeza que deseja excluir este fornecedor?"
+        itemName={supplierToDelete ? `${supplierToDelete.name} - ${supplierToDelete.service}` : undefined}
+        loading={deleteLoading}
+      />
     </div>
   );
 };

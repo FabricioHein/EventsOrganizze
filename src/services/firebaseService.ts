@@ -11,13 +11,174 @@ import {
   getDoc,
   Timestamp,
   writeBatch,
+  limit,
 } from 'firebase/firestore';
 import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { db } from '../lib/firebase';
-import { Client, Event, Payment, Product, EventProduct, Supplier, EventSupplier, Proposal, EventTimeline, UserSubscription } from '../types';
+import { Client, Event, Payment, Product, EventProduct, Supplier, EventSupplier, Proposal, EventTimeline, UserSubscription, UserProfile, AdminStats, Guest } from '../types';
 
 const storage = getStorage();
 
+// Admin Functions
+export const getAllUsers = async (): Promise<UserProfile[]> => {
+  const q = query(
+    collection(db, 'users'),
+    where('role', '!=', 'master'),
+    orderBy('createdAt', 'desc')
+  );
+  const querySnapshot = await getDocs(q);
+  
+  const users = await Promise.all(
+    querySnapshot.docs.map(async (userDoc) => {
+      const userData = userDoc.data();
+      
+      // Get user subscription
+      const subscriptionQuery = query(
+        collection(db, 'subscriptions'),
+        where('userId', '==', userDoc.id),
+        orderBy('createdAt', 'desc'),
+        limit(1)
+      );
+      const subscriptionSnapshot = await getDocs(subscriptionQuery);
+      let subscription = null;
+      
+      if (!subscriptionSnapshot.empty) {
+        const subData = subscriptionSnapshot.docs[0].data();
+        subscription = {
+          id: subscriptionSnapshot.docs[0].id,
+          ...subData,
+          startDate: subData.startDate.toDate(),
+          endDate: subData.endDate.toDate(),
+          createdAt: subData.createdAt.toDate(),
+        } as UserSubscription;
+      }
+      
+      return {
+        uid: userDoc.id,
+        email: userData.email,
+        displayName: userData.displayName,
+        photoURL: userData.photoURL,
+        role: userData.role,
+        createdAt: userData.createdAt.toDate(),
+        lastLogin: userData.lastLogin.toDate(),
+        subscription,
+      } as UserProfile;
+    })
+  );
+  
+  return users;
+};
+
+export const getAdminStats = async (): Promise<AdminStats> => {
+  const usersQuery = query(collection(db, 'users'));
+  const usersSnapshot = await getDocs(usersQuery);
+  
+  const subscriptionsQuery = query(collection(db, 'subscriptions'));
+  const subscriptionsSnapshot = await getDocs(subscriptionsQuery);
+  
+  const now = new Date();
+  const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  
+  let totalUsers = 0;
+  let newUsersLast7Days = 0;
+  let activeSubscriptions = 0;
+  let expiredSubscriptions = 0;
+  let trialUsers = 0;
+  let totalRevenue = 0;
+  
+  // Count users
+  usersSnapshot.docs.forEach(doc => {
+    const userData = doc.data();
+    totalUsers++;
+    if (userData.createdAt.toDate() >= sevenDaysAgo) {
+      newUsersLast7Days++;
+    }
+  });
+  
+  // Count subscriptions
+  subscriptionsSnapshot.docs.forEach(doc => {
+    const subData = doc.data();
+    const endDate = subData.endDate.toDate();
+    
+    if (subData.plan === 'free') {
+      trialUsers++;
+    } else if (endDate > now && subData.status === 'active') {
+      activeSubscriptions++;
+      // Calculate revenue (assuming monthly billing)
+      const planPrices = { basic: 99, professional: 149, premium: 199 };
+      totalRevenue += planPrices[subData.plan as keyof typeof planPrices] || 0;
+    } else {
+      expiredSubscriptions++;
+    }
+  });
+  
+  return {
+    totalUsers,
+    activeSubscriptions,
+    expiredSubscriptions,
+    trialUsers,
+    newUsersLast7Days,
+    totalRevenue,
+  };
+};
+
+export const updateUserRole = async (userId: string, role: 'master' | 'normal') => {
+  const userRef = doc(db, 'users', userId);
+  await updateDoc(userRef, { role });
+};
+
+// User Management Functions
+export const updateUserStatus = async (userId: string, isActive: boolean) => {
+  const userRef = doc(db, 'users', userId);
+  await updateDoc(userRef, { 
+    isActive,
+    updatedAt: Timestamp.now()
+  });
+};
+
+export const updateUserPlan = async (userId: string, plan: 'free' | 'basic' | 'professional' | 'premium') => {
+  const subscriptionRef = doc(db, 'subscriptions', userId);
+  
+  // Calculate new end date based on plan
+  const now = new Date();
+  const endDate = new Date();
+  
+  if (plan === 'free') {
+    endDate.setDate(now.getDate() + 7); // 7 days for free trial
+  } else {
+    endDate.setMonth(now.getMonth() + 1); // 1 month for paid plans
+  }
+  
+  const subscriptionData = {
+    userId,
+    plan,
+    status: 'active' as const,
+    cycle: 'monthly' as const,
+    startDate: Timestamp.now(),
+    endDate: Timestamp.fromDate(endDate),
+    updatedAt: Timestamp.now(),
+  };
+  
+  // Check if subscription exists
+  const subscriptionDoc = await getDoc(subscriptionRef);
+  
+  if (subscriptionDoc.exists()) {
+    await updateDoc(subscriptionRef, subscriptionData);
+  } else {
+    await addDoc(collection(db, 'subscriptions'), {
+      ...subscriptionData,
+      createdAt: Timestamp.now(),
+    });
+  }
+};
+
+export const updateSubscriptionEndDate = async (userId: string, endDate: Date) => {
+  const subscriptionRef = doc(db, 'subscriptions', userId);
+  await updateDoc(subscriptionRef, {
+    endDate: Timestamp.fromDate(endDate),
+    updatedAt: Timestamp.now(),
+  });
+};
 // Clients
 export const addClient = async (client: Omit<Client, 'id' | 'createdAt'>) => {
   const docRef = await addDoc(collection(db, 'clients'), {
@@ -85,7 +246,26 @@ export const updateEvent = async (id: string, event: Partial<Event>) => {
 };
 
 export const deleteEvent = async (id: string) => {
-  await deleteDoc(doc(db, 'events', id));
+  // First, get all payments for this event
+  const paymentsQuery = query(
+    collection(db, 'payments'),
+    where('eventId', '==', id)
+  );
+  const paymentsSnapshot = await getDocs(paymentsQuery);
+  
+  // Delete all related payments first
+  const batch = writeBatch(db);
+  paymentsSnapshot.docs.forEach(paymentDoc => {
+    batch.delete(paymentDoc.ref);
+  });
+  
+  // Delete the event
+  batch.delete(doc(db, 'events', id));
+  
+  // Commit all deletions
+  await batch.commit();
+  
+  return paymentsSnapshot.docs.length; // Return number of deleted payments
 };
 
 // Payments
@@ -350,18 +530,12 @@ export const deleteTimelineItem = async (id: string) => {
 
 // User Subscription
 export const getUserSubscription = async (userId: string): Promise<UserSubscription | null> => {
-  const q = query(
-    collection(db, 'subscriptions'),
-    where('userId', '==', userId),
-    where('status', '==', 'active')
-  );
-  const querySnapshot = await getDocs(q);
-  if (querySnapshot.empty) return null;
+  const subscriptionDoc = await getDoc(doc(db, 'subscriptions', userId));
+  if (!subscriptionDoc.exists()) return null;
   
-  const doc = querySnapshot.docs[0];
-  const data = doc.data();
+  const data = subscriptionDoc.data();
   return {
-    id: doc.id,
+    id: subscriptionDoc.id,
     ...data,
     startDate: data.startDate.toDate(),
     endDate: data.endDate.toDate(),
@@ -377,6 +551,183 @@ export const createSubscription = async (subscription: Omit<UserSubscription, 'i
     createdAt: Timestamp.now(),
   });
   return docRef.id;
+};
+
+export const updateSubscription = async (subscriptionId: string, updates: Partial<UserSubscription>) => {
+  const docRef = doc(db, 'subscriptions', subscriptionId);
+  const updateData: any = { ...updates };
+  
+  if (updates.startDate) {
+    updateData.startDate = Timestamp.fromDate(updates.startDate);
+  }
+  if (updates.endDate) {
+    updateData.endDate = Timestamp.fromDate(updates.endDate);
+  }
+  
+  await updateDoc(docRef, updateData);
+};
+
+// Asaas Integration Functions
+export const createAsaasCustomer = async (userId: string, userData: any) => {
+  try {
+    const customer = await asaasService.createCustomer({
+      name: userData.displayName || userData.name,
+      email: userData.email,
+      phone: userData.phone,
+      cpfCnpj: userData.cpfCnpj,
+    });
+    
+    // Save Asaas customer ID to user profile
+    await updateDoc(doc(db, 'users', userId), {
+      asaasCustomerId: customer.id
+    });
+    
+    return customer;
+  } catch (error) {
+    console.error('Error creating Asaas customer:', error);
+    throw error;
+  }
+};
+
+export const createAsaasSubscription = async (
+  userId: string, 
+  planId: string, 
+  cycle: 'monthly' | 'yearly',
+  paymentData: any
+) => {
+  try {
+    // Get user data
+    const userDoc = await getDoc(doc(db, 'users', userId));
+    const userData = userDoc.data();
+    
+    if (!userData) throw new Error('User not found');
+    
+    // Create or get Asaas customer
+    let asaasCustomerId = userData.asaasCustomerId;
+    if (!asaasCustomerId) {
+      const customer = await createAsaasCustomer(userId, userData);
+      asaasCustomerId = customer.id;
+    }
+    
+    // Get plan configuration
+    const planConfig = asaasService.getPlanConfig(planId);
+    if (!planConfig) throw new Error('Invalid plan');
+    
+    // Calculate value based on cycle
+    const value = cycle === 'yearly' ? planConfig.value * 10 : planConfig.value; // 2 months free for yearly
+    
+    // Create subscription in Asaas
+    const subscription = await asaasService.createSubscription({
+      customer: asaasCustomerId,
+      billingType: paymentData.billingType,
+      value,
+      nextDueDate: new Date().toISOString().split('T')[0],
+      cycle: cycle === 'monthly' ? 'MONTHLY' : 'YEARLY',
+      description: `${planConfig.name} - ${cycle === 'monthly' ? 'Mensal' : 'Anual'}`,
+      creditCard: paymentData.creditCard,
+      creditCardHolderInfo: paymentData.creditCardHolderInfo,
+    });
+    
+    // Create subscription in Firestore
+    const endDate = new Date();
+    if (cycle === 'monthly') {
+      endDate.setMonth(endDate.getMonth() + 1);
+    } else {
+      endDate.setFullYear(endDate.getFullYear() + 1);
+    }
+    
+    const subscriptionId = await createSubscription({
+      userId,
+      plan: planId as any,
+      status: 'active',
+      cycle,
+      startDate: new Date(),
+      endDate,
+      asaasCustomerId,
+      asaasSubscriptionId: subscription.id,
+    });
+    
+    return { subscriptionId, asaasSubscription: subscription };
+  } catch (error) {
+    console.error('Error creating Asaas subscription:', error);
+    throw error;
+  }
+};
+
+export const cancelAsaasSubscription = async (subscriptionId: string) => {
+  try {
+    // Get subscription from Firestore
+    const subscriptionDoc = await getDoc(doc(db, 'subscriptions', subscriptionId));
+    const subscriptionData = subscriptionDoc.data();
+    
+    if (!subscriptionData?.asaasSubscriptionId) {
+      throw new Error('Asaas subscription ID not found');
+    }
+    
+    // Cancel in Asaas
+    await asaasService.cancelSubscription(subscriptionData.asaasSubscriptionId);
+    
+    // Update status in Firestore
+    await updateSubscription(subscriptionId, {
+      status: 'canceled'
+    });
+    
+    return true;
+  } catch (error) {
+    console.error('Error canceling Asaas subscription:', error);
+    throw error;
+  }
+};
+
+export const handleAsaasWebhook = async (webhookData: AsaasWebhookEvent) => {
+  try {
+    const { event, payment } = webhookData;
+    
+    // Find subscription by Asaas subscription ID
+    const subscriptionsQuery = query(
+      collection(db, 'subscriptions'),
+      where('asaasSubscriptionId', '==', payment.subscription)
+    );
+    const subscriptionsSnapshot = await getDocs(subscriptionsQuery);
+    
+    if (subscriptionsSnapshot.empty) {
+      console.log('Subscription not found for webhook:', payment.subscription);
+      return;
+    }
+    
+    const subscriptionDoc = subscriptionsSnapshot.docs[0];
+    const subscriptionData = subscriptionDoc.data();
+    
+    switch (event) {
+      case 'PAYMENT_RECEIVED':
+        // Payment successful - extend subscription
+        const newEndDate = new Date(subscriptionData.endDate.toDate());
+        if (subscriptionData.cycle === 'monthly') {
+          newEndDate.setMonth(newEndDate.getMonth() + 1);
+        } else {
+          newEndDate.setFullYear(newEndDate.getFullYear() + 1);
+        }
+        
+        await updateSubscription(subscriptionDoc.id, {
+          status: 'active',
+          endDate: newEndDate
+        });
+        break;
+        
+      case 'PAYMENT_OVERDUE':
+        // Payment overdue - mark as expired
+        await updateSubscription(subscriptionDoc.id, {
+          status: 'expired'
+        });
+        break;
+        
+      default:
+        console.log('Unhandled webhook event:', event);
+    }
+  } catch (error) {
+    console.error('Error handling Asaas webhook:', error);
+    throw error;
+  }
 };
 
 // Products
@@ -447,4 +798,124 @@ export const uploadClientPhoto = async (clientId: string, file: File): Promise<s
   const url = await getDownloadURL(storageRef);
   
   return url;
+};
+
+// Guests
+export const addGuest = async (guest: Omit<Guest, 'id' | 'createdAt'>) => {
+  const docRef = await addDoc(collection(db, 'guests'), {
+    ...guest,
+    sentAt: guest.sentAt ? Timestamp.fromDate(guest.sentAt) : null,
+    confirmedAt: guest.confirmedAt ? Timestamp.fromDate(guest.confirmedAt) : null,
+    createdAt: Timestamp.now(),
+  });
+  return docRef.id;
+};
+
+export const getGuests = async (userId: string): Promise<Guest[]> => {
+  const q = query(
+    collection(db, 'guests'),
+    where('userId', '==', userId),
+    orderBy('createdAt', 'desc')
+  );
+  const querySnapshot = await getDocs(q);
+  return querySnapshot.docs.map(doc => {
+    const data = doc.data();
+    return {
+      id: doc.id,
+      ...data,
+      sentAt: data.sentAt?.toDate(),
+      confirmedAt: data.confirmedAt?.toDate(),
+      createdAt: data.createdAt.toDate(),
+    };
+  }) as Guest[];
+};
+
+export const getEventGuests = async (eventId: string): Promise<Guest[]> => {
+  const q = query(
+    collection(db, 'guests'),
+    where('eventId', '==', eventId),
+    orderBy('createdAt', 'desc')
+  );
+  const querySnapshot = await getDocs(q);
+  return querySnapshot.docs.map(doc => {
+    const data = doc.data();
+    return {
+      id: doc.id,
+      ...data,
+      sentAt: data.sentAt?.toDate(),
+      confirmedAt: data.confirmedAt?.toDate(),
+      createdAt: data.createdAt.toDate(),
+    };
+  }) as Guest[];
+};
+
+export const updateGuest = async (id: string, guest: Partial<Guest>) => {
+  const docRef = doc(db, 'guests', id);
+  const updateData: any = { ...guest };
+  if (guest.sentAt) {
+    updateData.sentAt = Timestamp.fromDate(guest.sentAt);
+  }
+  if (guest.confirmedAt) {
+    updateData.confirmedAt = Timestamp.fromDate(guest.confirmedAt);
+  }
+  await updateDoc(docRef, updateData);
+};
+
+export const deleteGuest = async (id: string) => {
+  await deleteDoc(doc(db, 'guests', id));
+};
+
+export const addGuestsBatch = async (guests: Omit<Guest, 'id' | 'createdAt'>[]) => {
+  const batch = writeBatch(db);
+  
+  guests.forEach((guest) => {
+    const guestRef = doc(collection(db, 'guests'));
+    batch.set(guestRef, {
+      ...guest,
+      sentAt: guest.sentAt ? Timestamp.fromDate(guest.sentAt) : null,
+      confirmedAt: guest.confirmedAt ? Timestamp.fromDate(guest.confirmedAt) : null,
+      createdAt: Timestamp.now(),
+    });
+  });
+  
+  await batch.commit();
+};
+
+export const sendGuestInvite = async (guestId: string, method: 'whatsapp' | 'email', customMessage?: string) => {
+  // Get current guest data
+  const guestDoc = await getDoc(doc(db, 'guests', guestId));
+  const guest = guestDoc.data() as Guest;
+  
+  if (!guest) throw new Error('Guest not found');
+  
+  // Create invite history entry
+  const historyEntry = {
+    id: crypto.randomUUID(),
+    method,
+    message: customMessage || '',
+    sentAt: new Date(),
+    status: 'sent' as const
+  };
+  
+  // Update guest with new status and history
+  const updatedHistory = [...(guest.inviteHistory || []), historyEntry];
+  
+  await updateGuest(guestId, {
+    status: 'sent',
+    sentAt: new Date(),
+    inviteHistory: updatedHistory
+  });
+  
+  // Return the message/URL for the user to send manually
+  
+  if (method === 'whatsapp') {
+    const message = customMessage || `Olá ${guest.name}! Você está convidado(a) para ${guest.eventName}. Confirme sua presença respondendo esta mensagem. Obrigado!`;
+    const whatsappUrl = `https://wa.me/${guest.phone.replace(/\D/g, '')}?text=${encodeURIComponent(message)}`;
+    return { type: 'whatsapp', url: whatsappUrl, message };
+  } else {
+    const subject = customMessage ? `Convite para ${guest.eventName}` : `Convite para ${guest.eventName}`;
+    const body = customMessage || `Olá ${guest.name}!\n\nVocê está convidado(a) para ${guest.eventName}.\nPor favor, confirme sua presença.\n\nObrigado!`;
+    const emailUrl = `mailto:${guest.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    return { type: 'email', url: emailUrl, subject, body };
+  }
 };

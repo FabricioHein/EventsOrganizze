@@ -1,15 +1,19 @@
 import React, { useEffect, useState } from 'react';
 import { useData } from '../contexts/DataContext';
 import { useTranslation } from 'react-i18next';
+import { usePlanLimits } from '../hooks/usePlanLimits';
 import { Calendar, DollarSign, Users, TrendingUp, Plus } from 'lucide-react';
 import { format, startOfMonth, endOfMonth, isWithinInterval, addDays } from 'date-fns';
 import Button from '../components/ui/Button';
 import MonthlyPaymentsModal from '../components/ui/MonthlyPaymentsModal';
+import TrialExpiringBanner from '../components/ui/TrialExpiringBanner';
+import PlanStatusBanner from '../components/ui/PlanStatusBanner';
 import { useNavigate } from 'react-router-dom';
 
 const Dashboard: React.FC = () => {
   const { events, payments, clients, loading } = useData();
   const { t } = useTranslation();
+  const planLimits = usePlanLimits();
   const navigate = useNavigate();
   const [showMonthlyPayments, setShowMonthlyPayments] = useState(false);
 
@@ -51,6 +55,12 @@ const Dashboard: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      {/* Trial Expiring Banner */}
+      <TrialExpiringBanner />
+      
+      {/* Plan Status Banner */}
+      <PlanStatusBanner />
+      
       {/* Header */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center">
         <div>

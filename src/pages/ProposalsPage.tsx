@@ -1,16 +1,26 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { useToast } from '../contexts/ToastContext';
+import { useFormValidation } from '../hooks/useFormValidation';
+import { usePlanLimits } from '../hooks/usePlanLimits';
+import { usePremiumFeatureToast } from '../components/ui/PremiumFeatureToast';
 import { getProposals, addProposal, updateProposal, deleteProposal, getClients } from '../services/firebaseService';
 import { Proposal, ProposalItem, Client } from '../types';
-import { Plus, Search, Edit2, Trash2, Send, Eye, CheckCircle, XCircle, Clock, FileText, MessageCircle } from 'lucide-react';
+import { Plus, Search, CreditCard as Edit2, Trash2, Send, Eye, CheckCircle, XCircle, Clock, FileText, MessageCircle, Lock, Crown, Pencil } from 'lucide-react';
 import Button from '../components/ui/Button';
 import Modal from '../components/ui/Modal';
+import DeleteConfirmModal from '../components/ui/DeleteConfirmModal';
 import ProposalPDFGenerator from '../components/ui/ProposalPDFGenerator';
+import LimitReachedModal from '../components/ui/LimitReachedModal';
+import PremiumPreviewModal from '../components/ui/PremiumPreviewModal';
 import { useForm, useFieldArray } from 'react-hook-form';
 import { format, addDays } from 'date-fns';
 
 const ProposalsPage: React.FC = () => {
   const { user } = useAuth();
+  const { showToast } = useToast();
+  const planLimits = usePlanLimits();
+  const { showPremiumToast, showLimitReachedToast } = usePremiumFeatureToast();
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
@@ -18,6 +28,12 @@ const ProposalsPage: React.FC = () => {
   const [editingProposal, setEditingProposal] = useState<Proposal | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [generatingPDF, setGeneratingPDF] = useState<string | null>(null);
+  const [showLimitModal, setShowLimitModal] = useState(false);
+  const [showPreviewModal, setShowPreviewModal] = useState(false);
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [proposalToDelete, setProposalToDelete] = useState<Proposal | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const { showValidation, validationErrors, triggerValidation, clearValidation, getFieldClassName } = useFormValidation();
 
   const { register, handleSubmit, reset, setValue, watch, control, formState: { errors } } = useForm<{
     clientId: string;
@@ -35,7 +51,11 @@ const ProposalsPage: React.FC = () => {
   const watchedItems = watch('items');
 
   useEffect(() => {
-    fetchData();
+    if (planLimits.hasProposals) {
+      fetchData();
+    } else {
+      setLoading(false);
+    }
   }, [user]);
 
   const fetchData = async () => {
@@ -58,6 +78,19 @@ const ProposalsPage: React.FC = () => {
   const onSubmit = async (data: any) => {
     if (!user) return;
 
+    // Check plan limits for free users
+    if (!planLimits.hasProposals) {
+      if (proposals.length >= planLimits.maxProposals) {
+        setShowLimitModal(true);
+        return;
+      }
+    }
+
+    // Check for validation errors and highlight fields
+    if (Object.keys(errors).length > 0) {
+      triggerValidation(errors);
+      return;
+    }
     try {
       const selectedClient = clients.find(c => c.id === data.clientId);
       if (!selectedClient) return;
@@ -84,12 +117,42 @@ const ProposalsPage: React.FC = () => {
       
       await fetchData();
       handleCloseModal();
+      
+      showToast({
+        type: 'success',
+        title: editingProposal ? 'Proposta atualizada com sucesso' : 'Proposta criada com sucesso',
+        message: editingProposal ? 'As informações da proposta foram atualizadas.' : 'A proposta foi criada e está pronta para envio.'
+      });
     } catch (error) {
       console.error('Error saving proposal:', error);
+      showToast({
+        type: 'error',
+        title: 'Erro ao salvar proposta',
+        message: 'Não foi possível salvar a proposta. Verifique os dados e tente novamente.'
+      });
     }
   };
 
+  const handleAddProposal = () => {
+    if (!planLimits.hasProposals && proposals.length >= planLimits.maxProposals) {
+      setShowLimitModal(true);
+      return;
+    }
+    
+    if (!planLimits.hasProposals) {
+      setShowPreviewModal(true);
+      return;
+    }
+    
+    setIsModalOpen(true);
+  };
+
   const handleEdit = (proposal: Proposal) => {
+    if (!planLimits.hasProposals) {
+      showPremiumToast('Edição de Propostas', 'Profissional');
+      return;
+    }
+    
     setEditingProposal(proposal);
     setValue('clientId', proposal.clientId);
     setValue('title', proposal.title);
@@ -99,18 +162,45 @@ const ProposalsPage: React.FC = () => {
     setIsModalOpen(true);
   };
 
-  const handleDelete = async (id: string) => {
-    if (window.confirm('Tem certeza que deseja excluir esta proposta?')) {
-      try {
-        await deleteProposal(id);
-        await fetchData();
-      } catch (error) {
-        console.error('Error deleting proposal:', error);
-      }
+  const handleDeleteClick = (proposal: Proposal) => {
+    setProposalToDelete(proposal);
+    setDeleteModalOpen(true);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!proposalToDelete) return;
+
+    setDeleteLoading(true);
+    try {
+      await deleteProposal(proposalToDelete.id);
+      await fetchData();
+      
+      showToast({
+        type: 'success',
+        title: 'Proposta excluída com sucesso',
+        message: 'A proposta foi removida do sistema.'
+      });
+      
+      setDeleteModalOpen(false);
+      setProposalToDelete(null);
+    } catch (error) {
+      console.error('Error deleting proposal:', error);
+      showToast({
+        type: 'error',
+        title: 'Erro ao excluir proposta',
+        message: 'Não foi possível excluir a proposta. Tente novamente.'
+      });
+    } finally {
+      setDeleteLoading(false);
     }
   };
 
   const handleSendProposal = async (proposal: Proposal) => {
+    if (!planLimits.hasProposals) {
+      showPremiumToast('Envio de Propostas', 'Profissional');
+      return;
+    }
+    
     try {
       await updateProposal(proposal.id, {
         status: 'sent',
@@ -118,10 +208,21 @@ const ProposalsPage: React.FC = () => {
       });
       await fetchData();
       
+      showToast({
+        type: 'success',
+        title: 'Proposta enviada com sucesso',
+        message: 'A proposta foi marcada como enviada.'
+      });
+      
       // Generate PDF and send via WhatsApp
       setGeneratingPDF(proposal.id);
     } catch (error) {
       console.error('Error sending proposal:', error);
+      showToast({
+        type: 'error',
+        title: 'Erro ao enviar proposta',
+        message: 'Não foi possível marcar a proposta como enviada.'
+      });
     }
   };
 
@@ -155,13 +256,19 @@ Equipe EventFinance`;
     // Open WhatsApp
     window.open(whatsappUrl, '_blank');
     
+    showToast({
+      type: 'success',
+      title: 'PDF gerado com sucesso',
+      message: 'O PDF foi gerado e o WhatsApp foi aberto para envio.'
+    });
+    
     setGeneratingPDF(null);
-    alert('PDF gerado! Agora você pode anexar o arquivo no WhatsApp que foi aberto.');
   };
 
   const handleCloseModal = () => {
     setIsModalOpen(false);
     setEditingProposal(null);
+    clearValidation();
     reset();
   };
 
@@ -217,6 +324,95 @@ Equipe EventFinance`;
     proposal.clientName.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  // Check if user has access to proposals
+  if (!planLimits.hasProposals && proposals.length === 0) {
+    return (
+      <div className="space-y-6">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900">Propostas</h1>
+            <p className="text-gray-600 mt-1">Gerencie suas propostas comerciais</p>
+          </div>
+          <Button onClick={handleAddProposal}>
+            <Plus size={20} className="mr-2" />
+            Nova Proposta
+          </Button>
+        </div>
+
+        <div className="bg-gradient-to-r from-purple-50 to-purple-100 border border-purple-200 rounded-lg p-8 text-center">
+          <div className="flex justify-center mb-4">
+            <div className="bg-purple-100 p-4 rounded-full">
+              <Lock size={48} className="text-purple-600" />
+            </div>
+          </div>
+          <h2 className="text-2xl font-bold text-purple-900 mb-4">
+            Propostas Profissionais
+          </h2>
+          <p className="text-purple-700 mb-6 max-w-2xl mx-auto">
+            Crie propostas personalizadas, envie por WhatsApp/Email e acompanhe visualizações. 
+            Disponível no Plano Profissional!
+          </p>
+          <div className="flex items-center justify-center space-x-6 mb-6">
+            <div className="flex items-center text-purple-600">
+              <CheckCircle size={16} className="mr-2" />
+              <span className="text-sm">Propostas ilimitadas</span>
+            </div>
+            <div className="flex items-center text-purple-600">
+              <CheckCircle size={16} className="mr-2" />
+              <span className="text-sm">Envio automático</span>
+            </div>
+            <div className="flex items-center text-purple-600">
+              <CheckCircle size={16} className="mr-2" />
+              <span className="text-sm">Rastreamento de visualizações</span>
+            </div>
+          </div>
+          <Button
+            onClick={() => window.location.href = '/subscription'}
+            className="bg-gradient-to-r from-purple-600 to-purple-800 hover:from-purple-700 hover:to-purple-900"
+          >
+            <Crown size={20} className="mr-2" />
+            Fazer Upgrade 🚀
+          </Button>
+        </div>
+
+        {/* Preview Modal */}
+        <PremiumPreviewModal
+          isOpen={showPreviewModal}
+          onClose={() => setShowPreviewModal(false)}
+          featureName="Propostas Profissionais"
+          requiredPlan="Profissional"
+          benefits={[
+            'Propostas ilimitadas',
+            'Templates personalizados',
+            'Envio por WhatsApp/Email',
+            'Rastreamento de visualizações',
+            'Assinatura digital',
+            'Relatórios de conversão'
+          ]}
+          previewContent={
+            <div className="bg-white p-6 rounded-lg border border-gray-200">
+              <h3 className="text-lg font-semibold mb-4">Proposta: Casamento Maria & João</h3>
+              <div className="space-y-3">
+                <div className="flex justify-between">
+                  <span>Decoração completa</span>
+                  <span>R$ 5.000,00</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Buffet premium</span>
+                  <span>R$ 8.000,00</span>
+                </div>
+                <div className="border-t pt-3 flex justify-between font-bold">
+                  <span>Total</span>
+                  <span>R$ 13.000,00</span>
+                </div>
+              </div>
+            </div>
+          }
+        />
+      </div>
+    );
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -232,8 +428,16 @@ Equipe EventFinance`;
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Propostas</h1>
           <p className="text-gray-600 mt-1">Gerencie suas propostas comerciais</p>
+          {!planLimits.hasProposals && (
+            <div className="mt-2 flex items-center text-orange-600">
+              <Lock size={16} className="mr-1" />
+              <span className="text-sm font-medium">
+                Limite: {proposals.length}/{planLimits.maxProposals} propostas
+              </span>
+            </div>
+          )}
         </div>
-        <Button onClick={() => setIsModalOpen(true)}>
+        <Button onClick={handleAddProposal}>
           <Plus size={20} className="mr-2" />
           Nova Proposta
         </Button>
@@ -254,13 +458,18 @@ Equipe EventFinance`;
       {/* Proposals List */}
       <div className="space-y-4">
         {filteredProposals.map((proposal) => (
-          <div key={proposal.id} className="bg-white p-6 rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
+          <div key={proposal.id} className={`bg-white p-6 rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition-shadow ${
+            !planLimits.hasProposals ? 'opacity-75' : ''
+          }`}>
             <div className="flex flex-col md:flex-row md:items-center justify-between">
               <div className="flex-1 mb-4 md:mb-0">
                 <div className="flex items-center mb-2">
                   <h3 className="text-lg font-semibold text-gray-900 mr-3">
                     {proposal.title}
                   </h3>
+                  {!planLimits.hasProposals && (
+                    <Lock size={16} className="text-orange-500 mr-2" />
+                  )}
                   <span className={`inline-flex items-center px-2 py-1 text-xs rounded-full ${getStatusColor(proposal.status)}`}>
                     {getStatusIcon(proposal.status)}
                     <span className="ml-1 capitalize">{proposal.status}</span>
@@ -287,7 +496,11 @@ Equipe EventFinance`;
                     <Button
                       size="sm"
                       onClick={() => handleSendProposal(proposal)}
-                      className="bg-green-600 hover:bg-green-700"
+                      className={`${
+                        planLimits.hasProposals 
+                          ? 'bg-green-600 hover:bg-green-700' 
+                          : 'bg-gray-400 cursor-not-allowed'
+                      }`}
                       disabled={generatingPDF === proposal.id}
                     >
                       <MessageCircle size={16} className="mr-1" />
@@ -297,7 +510,13 @@ Equipe EventFinance`;
                   <Button
                     size="sm"
                     variant="secondary"
-                    onClick={() => setGeneratingPDF(proposal.id)}
+                    onClick={() => {
+                      if (!planLimits.hasProposals) {
+                        showPremiumToast('Geração de PDF', 'Profissional');
+                        return;
+                      }
+                      setGeneratingPDF(proposal.id);
+                    }}
                     disabled={generatingPDF === proposal.id}
                   >
                     <FileText size={16} className="mr-1" />
@@ -305,12 +524,17 @@ Equipe EventFinance`;
                   </Button>
                   <button
                     onClick={() => handleEdit(proposal)}
-                    className="text-gray-400 hover:text-purple-600 transition-colors p-2"
+                    className={`transition-colors p-2 rounded-lg ${
+                      planLimits.hasProposals
+                        ? 'text-gray-400 hover:text-purple-600 hover:bg-purple-50'
+                        : 'text-gray-300 cursor-not-allowed'
+                    }`}
+                    title="Editar proposta"
                   >
-                    <Edit2 size={16} />
+                    <Pencil size={16} />
                   </button>
                   <button
-                    onClick={() => handleDelete(proposal.id)}
+                    onClick={() => handleDeleteClick(proposal)}
                     className="text-gray-400 hover:text-red-600 transition-colors p-2"
                   >
                     <Trash2 size={16} />
@@ -344,15 +568,15 @@ Equipe EventFinance`;
               <select
                 id="clientId"
                 {...register('clientId', { required: 'Cliente é obrigatório' })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                className={getFieldClassName('clientId', 'w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent')}
               >
                 <option value="">Selecione um cliente</option>
                 {clients.map(client => (
                   <option key={client.id} value={client.id}>{client.name}</option>
                 ))}
               </select>
-              {errors.clientId && (
-                <p className="text-red-500 text-sm mt-1">{errors.clientId.message}</p>
+              {(showValidation && validationErrors.clientId) && (
+                <p className="text-red-500 text-sm mt-1 animate-pulse">{validationErrors.clientId}</p>
               )}
             </div>
 
@@ -365,10 +589,10 @@ Equipe EventFinance`;
                 id="validUntil"
                 {...register('validUntil', { required: 'Data de validade é obrigatória' })}
                 min={format(new Date(), 'yyyy-MM-dd')}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                className={getFieldClassName('validUntil', 'w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent')}
               />
-              {errors.validUntil && (
-                <p className="text-red-500 text-sm mt-1">{errors.validUntil.message}</p>
+              {(showValidation && validationErrors.validUntil) && (
+                <p className="text-red-500 text-sm mt-1 animate-pulse">{validationErrors.validUntil}</p>
               )}
             </div>
           </div>
@@ -381,11 +605,11 @@ Equipe EventFinance`;
               type="text"
               id="title"
               {...register('title', { required: 'Título é obrigatório' })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              className={getFieldClassName('title', 'w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent')}
               placeholder="Ex: Decoração Casamento Maria e João"
             />
-            {errors.title && (
-              <p className="text-red-500 text-sm mt-1">{errors.title.message}</p>
+            {(showValidation && validationErrors.title) && (
+              <p className="text-red-500 text-sm mt-1 animate-pulse">{validationErrors.title}</p>
             )}
           </div>
 
@@ -500,6 +724,65 @@ Equipe EventFinance`;
           }}
         />
       )}
+
+      {/* Delete Confirmation Modal */}
+      <DeleteConfirmModal
+        isOpen={deleteModalOpen}
+        onClose={() => {
+          setDeleteModalOpen(false);
+          setProposalToDelete(null);
+        }}
+        onConfirm={handleDeleteConfirm}
+        title="Excluir Proposta"
+        message="Tem certeza que deseja excluir esta proposta?"
+        itemName={proposalToDelete?.title}
+        loading={deleteLoading}
+      />
+
+      {/* Limit Reached Modal */}
+      <LimitReachedModal
+        isOpen={showLimitModal}
+        onClose={() => setShowLimitModal(false)}
+        featureName="propostas"
+        currentCount={proposals.length}
+        limit={planLimits.maxProposals}
+        requiredPlan="Profissional"
+      />
+
+      {/* Premium Preview Modal */}
+      <PremiumPreviewModal
+        isOpen={showPreviewModal}
+        onClose={() => setShowPreviewModal(false)}
+        featureName="Propostas Profissionais"
+        requiredPlan="Profissional"
+        benefits={[
+          'Propostas ilimitadas',
+          'Templates personalizados',
+          'Envio por WhatsApp/Email',
+          'Rastreamento de visualizações',
+          'Assinatura digital',
+          'Relatórios de conversão'
+        ]}
+        previewContent={
+          <div className="bg-white p-6 rounded-lg border border-gray-200">
+            <h3 className="text-lg font-semibold mb-4">Proposta: Casamento Maria & João</h3>
+            <div className="space-y-3">
+              <div className="flex justify-between">
+                <span>Decoração completa</span>
+                <span>R$ 5.000,00</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Buffet premium</span>
+                <span>R$ 8.000,00</span>
+              </div>
+              <div className="border-t pt-3 flex justify-between font-bold">
+                <span>Total</span>
+                <span>R$ 13.000,00</span>
+              </div>
+            </div>
+          </div>
+        }
+      />
     </div>
   );
 };

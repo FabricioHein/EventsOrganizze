@@ -1,19 +1,27 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { getProducts, addProduct, updateProduct, deleteProduct } from '../services/firebaseService';
+import { useToast } from '../contexts/ToastContext';
+import { useFormValidation } from '../hooks/useFormValidation';
 import { Product } from '../types';
-import { Plus, Search, Edit2, Trash2, Package, DollarSign } from 'lucide-react';
+import { Plus, Search, CreditCard as Edit2, Trash2, Package, DollarSign, Pencil } from 'lucide-react';
 import Button from '../components/ui/Button';
 import Modal from '../components/ui/Modal';
+import DeleteConfirmModal from '../components/ui/DeleteConfirmModal';
 import { useForm } from 'react-hook-form';
+import { getProducts, addProduct, updateProduct, deleteProduct } from '../services/firebaseService';
 
 const ProductsPage: React.FC = () => {
   const { user } = useAuth();
+  const { showToast } = useToast();
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [productToDelete, setProductToDelete] = useState<Product | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const { showValidation, validationErrors, triggerValidation, clearValidation, getFieldClassName } = useFormValidation();
 
   const { register, handleSubmit, reset, setValue, formState: { errors } } = useForm<Omit<Product, 'id' | 'createdAt' | 'userId'>>();
 
@@ -37,6 +45,11 @@ const ProductsPage: React.FC = () => {
   const onSubmit = async (data: Omit<Product, 'id' | 'createdAt' | 'userId'>) => {
     if (!user) return;
 
+    // Check for validation errors and highlight fields
+    if (Object.keys(errors).length > 0) {
+      triggerValidation(errors);
+      return;
+    }
     try {
       if (editingProduct) {
         await updateProduct(editingProduct.id, data);
@@ -46,8 +59,19 @@ const ProductsPage: React.FC = () => {
       
       await fetchProducts();
       handleCloseModal();
+      
+      showToast({
+        type: 'success',
+        title: editingProduct ? 'Produto/Serviço atualizado com sucesso' : 'Produto/Serviço criado com sucesso',
+        message: editingProduct ? 'As informações foram atualizadas.' : 'O produto/serviço foi adicionado ao catálogo.'
+      });
     } catch (error) {
       console.error('Error saving product:', error);
+      showToast({
+        type: 'error',
+        title: 'Erro ao salvar produto/serviço',
+        message: 'Não foi possível salvar. Verifique os dados e tente novamente.'
+      });
     }
   };
 
@@ -59,20 +83,43 @@ const ProductsPage: React.FC = () => {
     setIsModalOpen(true);
   };
 
-  const handleDelete = async (id: string) => {
-    if (window.confirm('Tem certeza que deseja excluir este produto/serviço?')) {
-      try {
-        await deleteProduct(id);
-        await fetchProducts();
-      } catch (error) {
-        console.error('Error deleting product:', error);
-      }
+  const handleDeleteClick = (product: Product) => {
+    setProductToDelete(product);
+    setDeleteModalOpen(true);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!productToDelete) return;
+
+    setDeleteLoading(true);
+    try {
+      await deleteProduct(productToDelete.id);
+      await fetchProducts();
+      
+      showToast({
+        type: 'success',
+        title: 'Produto/Serviço excluído com sucesso',
+        message: 'O item foi removido do catálogo.'
+      });
+      
+      setDeleteModalOpen(false);
+      setProductToDelete(null);
+    } catch (error) {
+      console.error('Error deleting product:', error);
+      showToast({
+        type: 'error',
+        title: 'Erro ao excluir produto/serviço',
+        message: 'Não foi possível excluir o item. Tente novamente.'
+      });
+    } finally {
+      setDeleteLoading(false);
     }
   };
 
   const handleCloseModal = () => {
     setIsModalOpen(false);
     setEditingProduct(null);
+    clearValidation();
     reset();
   };
 
@@ -129,12 +176,13 @@ const ProductsPage: React.FC = () => {
               <div className="flex space-x-2">
                 <button
                   onClick={() => handleEdit(product)}
-                  className="text-gray-400 hover:text-purple-600 transition-colors"
+                  className="text-gray-400 hover:text-purple-600 transition-colors p-2 rounded-lg hover:bg-purple-50"
+                  title="Editar produto/serviço"
                 >
-                  <Edit2 size={16} />
+                  <Pencil size={16} />
                 </button>
                 <button
-                  onClick={() => handleDelete(product.id)}
+                  onClick={() => handleDeleteClick(product)}
                   className="text-gray-400 hover:text-red-600 transition-colors"
                 >
                   <Trash2 size={16} />
@@ -181,11 +229,11 @@ const ProductsPage: React.FC = () => {
               type="text"
               id="name"
               {...register('name', { required: 'Nome é obrigatório' })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              className={getFieldClassName('name', 'w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent')}
               placeholder="Ex: Decoração Completa, Buffet Premium..."
             />
-            {errors.name && (
-              <p className="text-red-500 text-sm mt-1">{errors.name.message}</p>
+            {(showValidation && validationErrors.name) && (
+              <p className="text-red-500 text-sm mt-1 animate-pulse">{validationErrors.name}</p>
             )}
           </div>
 
@@ -202,11 +250,11 @@ const ProductsPage: React.FC = () => {
                 required: 'Preço é obrigatório',
                 min: { value: 0, message: 'Preço deve ser positivo' }
               })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              className={getFieldClassName('price', 'w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent')}
               placeholder="0.00"
             />
-            {errors.price && (
-              <p className="text-red-500 text-sm mt-1">{errors.price.message}</p>
+            {(showValidation && validationErrors.price) && (
+              <p className="text-red-500 text-sm mt-1 animate-pulse">{validationErrors.price}</p>
             )}
           </div>
 
@@ -233,6 +281,20 @@ const ProductsPage: React.FC = () => {
           </div>
         </form>
       </Modal>
+
+      {/* Delete Confirmation Modal */}
+      <DeleteConfirmModal
+        isOpen={deleteModalOpen}
+        onClose={() => {
+          setDeleteModalOpen(false);
+          setProductToDelete(null);
+        }}
+        onConfirm={handleDeleteConfirm}
+        title="Excluir Produto/Serviço"
+        message="Tem certeza que deseja excluir este produto/serviço?"
+        itemName={productToDelete?.name}
+        loading={deleteLoading}
+      />
     </div>
   );
 };

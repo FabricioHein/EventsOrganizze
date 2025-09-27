@@ -1,13 +1,14 @@
 import React from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { Navigate } from 'react-router-dom';
+import { Navigate, useLocation } from 'react-router-dom';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
 }
 
 const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
-  const { user, loading } = useAuth();
+  const { user, loading, isAdmin } = useAuth();
+  const location = useLocation();
 
   if (loading) {
     return (
@@ -18,7 +19,17 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
   }
 
   if (!user) {
-    return <Navigate to="/" replace />;
+    return <Navigate to="/auth" replace />;
+  }
+
+  // Check admin access
+  if (location.pathname === '/admin' && !isAdmin) {
+    return <Navigate to="/dashboard" replace />;
+  }
+
+  // Redirect admin users to admin panel
+  if (isAdmin && location.pathname !== '/admin') {
+    return <Navigate to="/admin" replace />;
   }
 
   return <>{children}</>;

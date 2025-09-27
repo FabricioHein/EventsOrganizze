@@ -1,16 +1,21 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { useToast } from '../contexts/ToastContext';
+import { useFormValidation } from '../hooks/useFormValidation';
 import { useTranslation } from 'react-i18next';
 import { getClients, addClient, updateClient, deleteClient, uploadClientPhoto } from '../services/firebaseService';
 import { Client } from '../types';
-import { Plus, Search, Edit2, Trash2, Phone, Mail, User, Upload } from 'lucide-react';
-import Button from '../components/ui/Button';
+import { Plus, Search, Pencil, Trash2, Phone, Mail, User, Upload } from 'lucide-react';
 import Modal from '../components/ui/Modal';
+import DeleteConfirmModal from '../components/ui/DeleteConfirmModal';
 import { useForm } from 'react-hook-form';
+import Button from '../components/ui/Button';
+
 
 const ClientsPage: React.FC = () => {
   const { user } = useAuth();
   const { t } = useTranslation();
+  const { showToast } = useToast();
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -18,6 +23,10 @@ const ClientsPage: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
 
   const [uploadingPhoto, setUploadingPhoto] = useState<string | null>(null);
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [clientToDelete, setClientToDelete] = useState<Client | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const { showValidation, validationErrors, triggerValidation, clearValidation, getFieldClassName } = useFormValidation();
 
   const { register, handleSubmit, reset, setValue, formState: { errors } } = useForm<Omit<Client, 'id' | 'createdAt' | 'userId'>>();
 
@@ -41,6 +50,12 @@ const ClientsPage: React.FC = () => {
   const onSubmit = async (data: Omit<Client, 'id' | 'createdAt' | 'userId'>) => {
     if (!user) return;
 
+    // Check for validation errors and highlight fields
+    if (Object.keys(errors).length > 0) {
+      triggerValidation(errors);
+      return;
+    }
+
     try {
       if (editingClient) {
         await updateClient(editingClient.id, data);
@@ -50,8 +65,19 @@ const ClientsPage: React.FC = () => {
       
       await fetchClients();
       handleCloseModal();
+      
+      showToast({
+        type: 'success',
+        title: editingClient ? 'Cliente atualizado com sucesso' : 'Cliente criado com sucesso',
+        message: editingClient ? 'As informações do cliente foram atualizadas.' : 'O cliente foi adicionado à sua base.'
+      });
     } catch (error) {
       console.error('Error saving client:', error);
+      showToast({
+        type: 'error',
+        title: 'Erro ao salvar cliente',
+        message: 'Não foi possível salvar o cliente. Verifique os dados e tente novamente.'
+      });
     }
   };
 
@@ -68,14 +94,36 @@ const ClientsPage: React.FC = () => {
     setIsModalOpen(true);
   };
 
-  const handleDelete = async (id: string) => {
-    if (window.confirm(t('clients.deleteConfirm'))) {
-      try {
-        await deleteClient(id);
-        await fetchClients();
-      } catch (error) {
-        console.error('Error deleting client:', error);
-      }
+  const handleDeleteClick = (client: Client) => {
+    setClientToDelete(client);
+    setDeleteModalOpen(true);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!clientToDelete) return;
+
+    setDeleteLoading(true);
+    try {
+      await deleteClient(clientToDelete.id);
+      await fetchClients();
+      
+      showToast({
+        type: 'success',
+        title: 'Cliente excluído com sucesso',
+        message: 'O cliente foi removido da sua base.'
+      });
+      
+      setDeleteModalOpen(false);
+      setClientToDelete(null);
+    } catch (error) {
+      console.error('Error deleting client:', error);
+      showToast({
+        type: 'error',
+        title: 'Erro ao excluir cliente',
+        message: 'Não foi possível excluir o cliente. Tente novamente.'
+      });
+    } finally {
+      setDeleteLoading(false);
     }
   };
 
@@ -99,9 +147,19 @@ const ClientsPage: React.FC = () => {
       const photoURL = await uploadClientPhoto(clientId, file);
       await updateClient(clientId, { photoURL });
       await fetchClients();
+      
+      showToast({
+        type: 'success',
+        title: 'Foto atualizada com sucesso',
+        message: 'A foto do cliente foi atualizada.'
+      });
     } catch (error) {
       console.error('Error uploading photo:', error);
-      alert('Erro ao fazer upload da foto. Tente novamente.');
+      showToast({
+        type: 'error',
+        title: 'Erro ao fazer upload da foto',
+        message: 'Não foi possível atualizar a foto. Tente novamente.'
+      });
     } finally {
       setUploadingPhoto(null);
     }
@@ -110,6 +168,7 @@ const ClientsPage: React.FC = () => {
   const handleCloseModal = () => {
     setIsModalOpen(false);
     setEditingClient(null);
+    clearValidation();
     reset();
   };
 
@@ -237,12 +296,13 @@ const ClientsPage: React.FC = () => {
               <div className="flex space-x-2">
                 <button
                   onClick={() => handleEdit(client)}
-                  className="text-gray-400 hover:text-purple-600 transition-colors"
+                  className="text-gray-400 hover:text-purple-600 transition-colors p-2 rounded-lg hover:bg-purple-50"
+                  title="Editar cliente"
                 >
-                  <Edit2 size={16} />
+                  <Pencil size={16} />
                 </button>
                 <button
-                  onClick={() => handleDelete(client.id)}
+                  onClick={() => handleDeleteClick(client)}
                   className="text-gray-400 hover:text-red-600 transition-colors"
                 >
                   <Trash2 size={16} />
@@ -290,11 +350,11 @@ const ClientsPage: React.FC = () => {
             <input
               type="text"
               id="name"
-              {...register('name', { required: t('clients.validation.nameRequired') })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              {...register('name', { required: 'Nome é obrigatório' })}
+              className={getFieldClassName('name', 'w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent')}
             />
-            {errors.name && (
-              <p className="text-red-500 text-sm mt-1">{errors.name.message}</p>
+            {(showValidation && validationErrors.name) && (
+              <p className="text-red-500 text-sm mt-1 animate-pulse">{validationErrors.name}</p>
             )}
           </div>
 
@@ -306,7 +366,7 @@ const ClientsPage: React.FC = () => {
               type="tel"
               id="phone"
               {...register('phone')}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              className={getFieldClassName('phone', 'w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent')}
             />
           </div>
 
@@ -320,13 +380,13 @@ const ClientsPage: React.FC = () => {
               {...register('email', {
                 pattern: {
                   value: /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i,
-                  message: t('clients.validation.emailInvalid')
+                  message: 'E-mail inválido'
                 }
               })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              className={getFieldClassName('email', 'w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent')}
             />
-            {errors.email && (
-              <p className="text-red-500 text-sm mt-1">{errors.email.message}</p>
+            {(showValidation && validationErrors.email) && (
+              <p className="text-red-500 text-sm mt-1 animate-pulse">{validationErrors.email}</p>
             )}
           </div>
 
@@ -431,6 +491,20 @@ const ClientsPage: React.FC = () => {
           </div>
         </form>
       </Modal>
+
+      {/* Delete Confirmation Modal */}
+      <DeleteConfirmModal
+        isOpen={deleteModalOpen}
+        onClose={() => {
+          setDeleteModalOpen(false);
+          setClientToDelete(null);
+        }}
+        onConfirm={handleDeleteConfirm}
+        title="Excluir Cliente"
+        message="Tem certeza que deseja excluir este cliente?"
+        itemName={clientToDelete?.name}
+        loading={deleteLoading}
+      />
     </div>
   );
 };

@@ -1,19 +1,26 @@
 import React, { useEffect, useState } from 'react';
 import { useData } from '../contexts/DataContext';
 import { useAuth } from '../contexts/AuthContext';
+import { useToast } from '../contexts/ToastContext';
+import { useFormValidation } from '../hooks/useFormValidation';
 import { useTranslation } from 'react-i18next';
 import { addPayment, updatePayment, deletePayment, addPaymentInstallments, getProducts } from '../services/firebaseService';
 import { Payment } from '../types';
-import { Plus, Search, Edit2, Trash2, DollarSign, Calendar, CheckCircle, XCircle } from 'lucide-react';
+import { Plus, Search, Pencil, Trash2, DollarSign, Calendar, CheckCircle, XCircle } from 'lucide-react';
+import { Receipt } from 'lucide-react';
 import Button from '../components/ui/Button';
 import Modal from '../components/ui/Modal';
+import DeleteConfirmModal from '../components/ui/DeleteConfirmModal';
 import PaymentInstallmentsModal from '../components/ui/PaymentInstallmentsModal';
 import { useForm } from 'react-hook-form';
 import { format } from 'date-fns';
+import jsPDF from 'jspdf';
+import { ptBR } from 'date-fns/locale';
 
 const PaymentsPage: React.FC = () => {
   const { events, payments, products, refreshPayments, refreshEvents, refreshData } = useData();
   const { user } = useAuth();
+  const { showToast } = useToast();
   const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -32,6 +39,12 @@ const PaymentsPage: React.FC = () => {
   const [hasDownPayment, setHasDownPayment] = useState(false);
   const [downPaymentAmount, setDownPaymentAmount] = useState<string>('');
   const [downPaymentReceived, setDownPaymentReceived] = useState(false);
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [paymentToDelete, setPaymentToDelete] = useState<Payment | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const { showValidation, validationErrors, triggerValidation, clearValidation, getFieldClassName } = useFormValidation();
+
+  const [generatingReceipt, setGeneratingReceipt] = useState<string | null>(null);
 
   const { register, handleSubmit, reset, setValue, formState: { errors } } = useForm<Omit<Payment, 'id' | 'createdAt' | 'userId' | 'eventName'>>();
 
@@ -40,6 +53,12 @@ const PaymentsPage: React.FC = () => {
   }, [events, payments, products]);
 
   const onSubmit = async (data: Omit<Payment, 'id' | 'createdAt' | 'userId' | 'eventName'>) => {
+    // Check for validation errors and highlight fields
+    if (Object.keys(errors).length > 0) {
+      triggerValidation(errors);
+      return;
+    }
+
     try {
       const selectedEvent = events.find(e => e.id === data.eventId);
       if (!selectedEvent) return;
@@ -113,8 +132,29 @@ const PaymentsPage: React.FC = () => {
       // Refresh all data to ensure synchronization between Events and Payments
       await refreshData();
       handleCloseModal();
+      
+      showToast({
+        type: 'success',
+        title: isCreatingInstallments 
+          ? hasDownPayment 
+            ? `Entrada + ${installmentCount} parcela(s) criada(s) com sucesso`
+            : `${installmentCount} parcela(s) criada(s) com sucesso`
+          : editingPayment 
+            ? 'Pagamento atualizado com sucesso'
+            : 'Pagamento criado com sucesso',
+        message: isCreatingInstallments 
+          ? 'O parcelamento foi configurado e os pagamentos foram criados.'
+          : editingPayment 
+            ? 'As informações do pagamento foram atualizadas.'
+            : 'O pagamento foi registrado no sistema.'
+      });
     } catch (error) {
       console.error('Error saving payment:', error);
+      showToast({
+        type: 'error',
+        title: 'Erro ao salvar pagamento',
+        message: 'Não foi possível salvar o pagamento. Verifique os dados e tente novamente.'
+      });
     }
   };
 
@@ -129,15 +169,36 @@ const PaymentsPage: React.FC = () => {
     setIsModalOpen(true);
   };
 
-  const handleDelete = async (id: string) => {
-    if (window.confirm(t('payments.deleteConfirm'))) {
-      try {
-        await deletePayment(id);
-        // Refresh all data to ensure synchronization between Events and Payments
-        await refreshData();
-      } catch (error) {
-        console.error('Error deleting payment:', error);
-      }
+  const handleDeleteClick = (payment: Payment) => {
+    setPaymentToDelete(payment);
+    setDeleteModalOpen(true);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!paymentToDelete) return;
+
+    setDeleteLoading(true);
+    try {
+      await deletePayment(paymentToDelete.id);
+      await refreshData();
+      
+      showToast({
+        type: 'success',
+        title: 'Pagamento excluído com sucesso',
+        message: 'O pagamento foi removido do sistema.'
+      });
+      
+      setDeleteModalOpen(false);
+      setPaymentToDelete(null);
+    } catch (error) {
+      console.error('Error deleting payment:', error);
+      showToast({
+        type: 'error',
+        title: 'Erro ao excluir pagamento',
+        message: 'Não foi possível excluir o pagamento. Tente novamente.'
+      });
+    } finally {
+      setDeleteLoading(false);
     }
   };
 
@@ -146,8 +207,19 @@ const PaymentsPage: React.FC = () => {
       await updatePayment(payment.id, { received: !payment.received });
       // Refresh all data to ensure synchronization between Events and Payments
       await refreshData();
+      
+      showToast({
+        type: 'success',
+        title: payment.received ? 'Pagamento confirmado' : 'Pagamento marcado como pendente',
+        message: payment.received ? 'O pagamento foi marcado como recebido.' : 'O pagamento foi marcado como pendente.'
+      });
     } catch (error) {
       console.error('Error updating payment status:', error);
+      showToast({
+        type: 'error',
+        title: 'Erro ao atualizar status',
+        message: 'Não foi possível atualizar o status do pagamento.'
+      });
     }
   };
 
@@ -184,6 +256,139 @@ const PaymentsPage: React.FC = () => {
     }
   };
 
+  const generateReceipt = async (payment: Payment) => {
+    setGeneratingReceipt(payment.id);
+    
+    try {
+      const doc = new jsPDF();
+      const pageWidth = doc.internal.pageSize.width;
+      const pageHeight = doc.internal.pageSize.height;
+      let yPosition = 30;
+
+      // Header
+      doc.setFontSize(20);
+      doc.setTextColor(139, 92, 246);
+      doc.text('RECIBO DE PAGAMENTO', pageWidth / 2, yPosition, { align: 'center' });
+      yPosition += 20;
+
+      // Receipt number and date
+      doc.setFontSize(10);
+      doc.setTextColor(100, 100, 100);
+      doc.text(`Recibo Nº: ${payment.id.slice(-8).toUpperCase()}`, pageWidth - 20, 20, { align: 'right' });
+      doc.text(`Data de Emissão: ${format(new Date(), 'dd/MM/yyyy HH:mm')}`, pageWidth - 20, 30, { align: 'right' });
+      
+      // Company info (you can customize this)
+      doc.setFontSize(12);
+      doc.setTextColor(0, 0, 0);
+      doc.text('EventFinance', 20, yPosition);
+      yPosition += 8;
+      doc.setFontSize(10);
+      doc.text('Sistema de Gestão de Eventos', 20, yPosition);
+      yPosition += 20;
+
+      // Payment details
+      doc.setFontSize(14);
+      doc.setTextColor(139, 92, 246);
+      doc.text('DETALHES DO PAGAMENTO', 20, yPosition);
+      yPosition += 15;
+
+      // Create a box for payment details
+      doc.setDrawColor(200, 200, 200);
+      doc.setFillColor(248, 249, 250);
+      doc.rect(20, yPosition, pageWidth - 40, 60, 'FD');
+      
+      yPosition += 15;
+      doc.setFontSize(11);
+      doc.setTextColor(0, 0, 0);
+      
+      doc.text(`Evento: ${payment.eventName}`, 25, yPosition);
+      yPosition += 10;
+      doc.text(`Data do Pagamento: ${format(payment.paymentDate, 'dd/MM/yyyy', { locale: ptBR })}`, 25, yPosition);
+      yPosition += 10;
+      doc.text(`Método de Pagamento: ${payment.method.toUpperCase()}`, 25, yPosition);
+      yPosition += 10;
+      doc.text(`Status: ${payment.received ? 'PAGO' : 'PENDENTE'}`, 25, yPosition);
+      
+      if (payment.installmentNumber) {
+        yPosition += 10;
+        doc.text(`Parcela: ${payment.installmentNumber}/${payment.totalInstallments}`, 25, yPosition);
+      }
+      
+      yPosition += 20;
+
+      // Amount section
+      doc.setFontSize(16);
+      doc.setTextColor(139, 92, 246);
+      doc.text('VALOR', 20, yPosition);
+      yPosition += 15;
+      
+      doc.setDrawColor(139, 92, 246);
+      doc.setFillColor(139, 92, 246);
+      doc.rect(20, yPosition, pageWidth - 40, 25, 'FD');
+      
+      doc.setFontSize(18);
+      doc.setTextColor(255, 255, 255);
+      doc.text(
+        `R$ ${payment.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`,
+        pageWidth / 2,
+        yPosition + 16,
+        { align: 'center' }
+      );
+      
+      yPosition += 40;
+
+      // Notes
+      if (payment.notes) {
+        doc.setFontSize(12);
+        doc.setTextColor(0, 0, 0);
+        doc.text('Observações:', 20, yPosition);
+        yPosition += 10;
+        
+        doc.setFontSize(10);
+        const splitNotes = doc.splitTextToSize(payment.notes, pageWidth - 40);
+        doc.text(splitNotes, 20, yPosition);
+        yPosition += splitNotes.length * 5 + 10;
+      }
+
+      // Footer
+      yPosition = pageHeight - 40;
+      doc.setFontSize(10);
+      doc.setTextColor(100, 100, 100);
+      doc.text('Este recibo foi gerado automaticamente pelo sistema EventFinance.', pageWidth / 2, yPosition, { align: 'center' });
+      doc.text(`Gerado em: ${format(new Date(), 'dd/MM/yyyy HH:mm', { locale: ptBR })}`, pageWidth / 2, yPosition + 8, { align: 'center' });
+      
+      // Status stamp
+      if (payment.received) {
+        doc.setFontSize(24);
+        doc.setTextColor(34, 197, 94);
+        doc.text('✓ PAGO', pageWidth - 60, 80, { align: 'center', angle: -15 });
+      } else {
+        doc.setFontSize(20);
+        doc.setTextColor(239, 68, 68);
+        doc.text('PENDENTE', pageWidth - 60, 80, { align: 'center', angle: -15 });
+      }
+
+      // Save PDF
+      const fileName = `recibo-${payment.eventName.replace(/\s+/g, '-')}-${format(payment.paymentDate, 'yyyy-MM-dd')}.pdf`;
+      doc.save(fileName);
+      
+      showToast({
+        type: 'success',
+        title: 'Recibo gerado com sucesso',
+        message: 'O recibo foi baixado automaticamente.'
+      });
+    } catch (error) {
+      console.error('Error generating receipt:', error);
+      showToast({
+        type: 'error',
+        title: 'Erro ao gerar recibo',
+        message: 'Não foi possível gerar o recibo. Tente novamente.'
+      });
+    } finally {
+      setGeneratingReceipt(null);
+    }
+  };
+
   const handleCloseModal = () => {
     setIsModalOpen(false);
     setEditingPayment(null);
@@ -193,6 +398,7 @@ const PaymentsPage: React.FC = () => {
     setHasDownPayment(false);
     setDownPaymentAmount('');
     setDownPaymentReceived(false);
+    clearValidation();
     reset();
   };
 
@@ -508,13 +714,26 @@ const PaymentsPage: React.FC = () => {
                   
                   <div className="flex space-x-2">
                     <button
-                      onClick={() => handleEdit(payment)}
-                      className="text-gray-400 hover:text-purple-600 transition-colors"
+                      onClick={() => generateReceipt(payment)}
+                      disabled={generatingReceipt === payment.id}
+                      className="text-gray-400 hover:text-blue-600 transition-colors p-2 rounded-lg hover:bg-blue-50"
+                      title="Gerar recibo"
                     >
-                      <Edit2 size={16} />
+                      {generatingReceipt === payment.id ? (
+                        <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                      ) : (
+                        <Receipt size={16} />
+                      )}
                     </button>
                     <button
-                      onClick={() => handleDelete(payment.id)}
+                      onClick={() => handleEdit(payment)}
+                      className="text-gray-400 hover:text-purple-600 transition-colors p-2 rounded-lg hover:bg-purple-50"
+                      title="Editar pagamento"
+                    >
+                      <Pencil size={16} />
+                    </button>
+                    <button
+                      onClick={() => handleDeleteClick(payment)}
                       className="text-gray-400 hover:text-red-600 transition-colors"
                     >
                       <Trash2 size={16} />
@@ -546,16 +765,16 @@ const PaymentsPage: React.FC = () => {
             </label>
             <select
               id="eventId"
-              {...register('eventId', { required: t('payments.validation.eventRequired') })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              {...register('eventId', { required: 'Evento é obrigatório' })}
+              className={getFieldClassName('eventId', 'w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent')}
             >
               <option value="">{t('payments.fields.selectEvent')}</option>
               {events.map(event => (
                 <option key={event.id} value={event.id}>{event.name}</option>
               ))}
             </select>
-            {errors.eventId && (
-              <p className="text-red-500 text-sm mt-1">{errors.eventId.message}</p>
+            {(showValidation && validationErrors.eventId) && (
+              <p className="text-red-500 text-sm mt-1 animate-pulse">{validationErrors.eventId}</p>
             )}
           </div>
 
@@ -692,13 +911,13 @@ const PaymentsPage: React.FC = () => {
                 step="0.01"
                 min="0"
                 {...register('amount', { 
-                  required: t('payments.validation.amountRequired'),
-                  min: { value: 0, message: t('payments.validation.amountPositive') }
+                  required: 'Valor é obrigatório',
+                  min: { value: 0, message: 'Valor deve ser positivo' }
                 })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                className={getFieldClassName('amount', 'w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent')}
               />
-              {errors.amount && (
-                <p className="text-red-500 text-sm mt-1">{errors.amount.message}</p>
+              {(showValidation && validationErrors.amount) && (
+                <p className="text-red-500 text-sm mt-1 animate-pulse">{validationErrors.amount}</p>
               )}
             </div>
 
@@ -709,11 +928,11 @@ const PaymentsPage: React.FC = () => {
               <input
                 type="date"
                 id="paymentDate"
-                {...register('paymentDate', { required: t('payments.validation.dateRequired') })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                {...register('paymentDate', { required: 'Data do pagamento é obrigatória' })}
+                className={getFieldClassName('paymentDate', 'w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent')}
               />
-              {errors.paymentDate && (
-                <p className="text-red-500 text-sm mt-1">{errors.paymentDate.message}</p>
+              {(showValidation && validationErrors.paymentDate) && (
+                <p className="text-red-500 text-sm mt-1 animate-pulse">{validationErrors.paymentDate}</p>
               )}
             </div>
           </div>
@@ -724,8 +943,8 @@ const PaymentsPage: React.FC = () => {
             </label>
             <select
               id="method"
-              {...register('method', { required: t('payments.validation.methodRequired') })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              {...register('method', { required: 'Método de pagamento é obrigatório' })}
+              className={getFieldClassName('method', 'w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent')}
             >
               <option value="">{t('payments.fields.selectPaymentMethod')}</option>
               <option value="pix">{t('payments.methods.pix')}</option>
@@ -733,8 +952,8 @@ const PaymentsPage: React.FC = () => {
               <option value="boleto">{t('payments.methods.boleto')}</option>
               <option value="cash">{t('payments.methods.cash')}</option>
             </select>
-            {errors.method && (
-              <p className="text-red-500 text-sm mt-1">{errors.method.message}</p>
+            {(showValidation && validationErrors.method) && (
+              <p className="text-red-500 text-sm mt-1 animate-pulse">{validationErrors.method}</p>
             )}
           </div>
 
@@ -800,6 +1019,20 @@ const PaymentsPage: React.FC = () => {
           </div>
         </form>
       </Modal>
+
+      {/* Delete Confirmation Modal */}
+      <DeleteConfirmModal
+        isOpen={deleteModalOpen}
+        onClose={() => {
+          setDeleteModalOpen(false);
+          setPaymentToDelete(null);
+        }}
+        onConfirm={handleDeleteConfirm}
+        title="Excluir Pagamento"
+        message="Tem certeza que deseja excluir este pagamento?"
+        itemName={paymentToDelete ? `${paymentToDelete.eventName} - R$ ${paymentToDelete.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : undefined}
+        loading={deleteLoading}
+      />
     </div>
   );
 };
